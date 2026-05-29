@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "pir-sensor"
 path = "src/pir.rs"
@@ -24,3 +27,4 @@ path = "src/mpu6050.rs"
 gpio_core = { path = "../gpio_core" }
 tokio.workspace = true
 anyhow.workspace = true
+rppal.workspace = true
