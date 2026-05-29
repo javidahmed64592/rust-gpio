@@ -1,27 +1,37 @@
-//! LED Actuator
+//! LED Actuator Binary
 //!
-//! Controls desk lighting via LED(s).
-//! Consumes commands: LedOn, LedOff, SetBrightness.
-//! Contains no business logic - purely command-driven.
+//! Standalone binary for testing the LED actuator.
 
 use anyhow::Result;
+use gpio_core::Command;
+use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("LED Actuator starting...");
+    // For standalone testing, create a channel and send test commands
+    let (tx, rx) = mpsc::channel(32);
 
-    // TODO: Load config
-    // TODO: Initialize GPIO pin for LED
-    // TODO: Set up command channel
-    // TODO: Listen for commands (LedOn, LedOff, SetBrightness)
-    // TODO: Apply PWM for brightness control
-    // TODO: Execute commands without embedded logic
+    // Spawn the LED actuator
+    let led_handle = tokio::spawn(async move { actuators::run_led_actuator(rx).await });
 
-    println!("LED Actuator initialized (placeholder)");
+    // Send some test commands
+    println!("\n=== Standalone LED Test ===");
+    println!("Sending test commands...\n");
+
+    tx.send(Command::LedOn).await?;
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    tx.send(Command::LedOff).await?;
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    println!("\nTest complete. Press Ctrl+C to exit.");
 
     // Keep running
     tokio::signal::ctrl_c().await?;
-    println!("LED Actuator shutting down...");
+
+    // Close channel and wait for cleanup
+    drop(tx);
+    let _ = led_handle.await;
 
     Ok(())
 }
