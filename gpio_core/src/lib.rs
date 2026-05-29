@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 pub enum Event {
     /// PIR sensor detected motion
     MotionDetected,
-    /// PIR sensor motion timeout expired
-    MotionExpired,
     /// Lighting mode toggle button was pressed
     LightingModeTogglePressed,
     /// Brightness adjustment button was pressed
@@ -31,9 +29,12 @@ pub enum Command {
     LedOn,
     LedOff,
     SetBrightness(u8),
-    
+
     /// LCD commands
-    DisplayText { line: u8, text: String },
+    DisplayText {
+        line: u8,
+        text: String,
+    },
     ClearDisplay,
 }
 
