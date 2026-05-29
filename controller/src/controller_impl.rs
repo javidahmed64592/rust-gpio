@@ -114,13 +114,22 @@ fn handle_event(
         Event::LightingModeTogglePressed => {
             // Toggle between Automatic and Manual Override
             state.lighting_mode = match state.lighting_mode {
-                LightingMode::Automatic => LightingMode::ManualOverride,
-                LightingMode::ManualOverride => LightingMode::Automatic,
+                LightingMode::Automatic => {
+                    println!("[Controller] Switching to Manual Override - turning LED OFF");
+                    commands.push(Command::LedOff);
+                    LightingMode::ManualOverride
+                }
+                LightingMode::ManualOverride => {
+                    println!("[Controller] Switching to Automatic mode");
+                    // If presence is detected, turn LED back on
+                    if state.presence_detected {
+                        println!("[Controller] Presence detected - turning LED ON");
+                        commands.push(Command::LedOn);
+                    }
+                    LightingMode::Automatic
+                }
             };
-            println!(
-                "[Controller] Lighting mode toggled to: {:?}",
-                state.lighting_mode
-            );
+            println!("[Controller] Lighting mode now: {:?}", state.lighting_mode);
         }
 
         Event::BrightnessButtonPressed => {
