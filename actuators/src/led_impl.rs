@@ -14,20 +14,20 @@ impl LedController {
     fn new(pin_number: u8) -> Result<Self> {
         let gpio = Gpio::new()?;
         let pin = gpio.get(pin_number)?.into_output();
-        println!("LED initialized on GPIO pin: {}", pin_number);
+        println!("[LED] Initialized on GPIO pin: {}", pin_number);
         Ok(Self { pin })
     }
 
     /// Turn LED on
     fn turn_on(&mut self) {
         self.pin.set_high();
-        println!("LED: ON");
+        println!("[LED] ON");
     }
 
     /// Turn LED off
     fn turn_off(&mut self) {
         self.pin.set_low();
-        println!("LED: OFF");
+        println!("[LED] OFF");
     }
 
     /// Set brightness using PWM (0-100)
@@ -38,7 +38,7 @@ impl LedController {
         } else {
             self.turn_off();
         }
-        println!("LED brightness: {}%", level);
+        println!("[LED] Brightness: {}%", level);
     }
 }
 
@@ -53,7 +53,7 @@ pub async fn run_led_actuator(mut command_rx: mpsc::Receiver<Command>) -> Result
 
     // Ensure LED starts off
     led.turn_off();
-    println!("LED ready to receive commands!");
+    println!("[LED] Ready to receive commands!");
 
     // Process commands from the channel
     while let Some(command) = command_rx.recv().await {
@@ -67,7 +67,7 @@ pub async fn run_led_actuator(mut command_rx: mpsc::Receiver<Command>) -> Result
 
     // Clean shutdown - turn off LED
     led.turn_off();
-    println!("LED Actuator shutting down...");
+    println!("[LED] Shutting down...");
 
     Ok(())
 }
