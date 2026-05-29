@@ -45,28 +45,58 @@ async fn main() -> Result<()> {
     });
     println!("  ✓ Controller spawned");
 
+    // Clone event_tx for each sensor
+    let pir_event_tx = event_tx.clone();
+    let override_event_tx = event_tx.clone();
+    let brightness_event_tx = event_tx;
+
     // Spawn PIR sensor task
     let pir_handle = tokio::spawn(async move {
-        if let Err(e) = sensors::run_pir_sensor(event_tx).await {
+        if let Err(e) = sensors::run_pir_sensor(pir_event_tx).await {
             eprintln!("PIR sensor error: {}", e);
         }
     });
     println!("  ✓ PIR sensor spawned");
 
+    // Spawn lighting override button task
+    let override_handle = tokio::spawn(async move {
+        if let Err(e) = sensors::run_lighting_override_button(override_event_tx).await {
+            eprintln!("Lighting override button error: {}", e);
+        }
+    });
+    println!("  ✓ Lighting override button spawned");
+
+    // Spawn brightness button task
+    let brightness_handle = tokio::spawn(async move {
+        if let Err(e) = sensors::run_brightness_button(brightness_event_tx).await {
+            eprintln!("Brightness button error: {}", e);
+        }
+    });
+    println!("  ✓ Brightness button spawned");
+
     println!("\n=== System Ready ===");
     println!("All components running.");
-    println!("PIR sensor is monitoring for motion...");
-    println!("Wave your hand near the PIR sensor to test!");
+    println!("");
+    println!("Controls:");
+    println!("  • PIR sensor: Wave hand to trigger motion detection");
+    println!("  • Override button (GPIO 21): Toggle Automatic/Manual mode");
+    println!("  • Brightness button (GPIO 20): Cycle brightness (25% → 50% → 75% → 100%)");
     println!("\nPress Ctrl+C to shut down\n");
 
     // Wait for Ctrl+C
     tokio::signal::ctrl_c().await?;
 
     println!("\n\nShutdown signal received...");
-    println!("Stopping all components...");
+    println!("Stopping all tasks...");
 
     // Wait for tasks to finish gracefully
-    let _ = tokio::join!(led_handle, controller_handle, pir_handle);
+    let _ = tokio::join!(
+        led_handle,
+        controller_handle,
+        pir_handle,
+        override_handle,
+        brightness_handle
+    );
 
     println!("\nGPIO System shut down cleanly.");
 
