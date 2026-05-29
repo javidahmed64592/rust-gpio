@@ -12,12 +12,8 @@ name = "pir-sensor"
 path = "src/pir.rs"
 
 [[bin]]
-name = "lighting-override-button"
-path = "src/lighting_override_button.rs"
-
-[[bin]]
-name = "brightness-button"
-path = "src/brightness_button.rs"
+name = "button-test"
+path = "src/bin/button_test.rs"
 
 [[bin]]
 name = "mpu6050-sensor"
