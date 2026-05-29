@@ -1,0 +1,18 @@
+[package]
+name = "actuators"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "led-actuator"
+path = "src/led.rs"
+
+[[bin]]
+name = "lcd-actuator"
+path = "src/lcd.rs"
+
+[dependencies]
+gpio_core = { path = "../gpio_core" }
+tokio.workspace = true
+anyhow.workspace = true

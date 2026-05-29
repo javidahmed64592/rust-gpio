@@ -1,0 +1,26 @@
+[package]
+name = "sensors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pir-sensor"
+path = "src/pir.rs"
+
+[[bin]]
+name = "lighting-override-button"
+path = "src/lighting_override_button.rs"
+
+[[bin]]
+name = "brightness-button"
+path = "src/brightness_button.rs"
+
+[[bin]]
+name = "mpu6050-sensor"
+path = "src/mpu6050.rs"
+
+[dependencies]
+gpio_core = { path = "../gpio_core" }
+tokio.workspace = true
+anyhow.workspace = true

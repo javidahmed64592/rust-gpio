@@ -1,0 +1,14 @@
+[package]
+name = "controller"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "controller"
+path = "src/main.rs"
+
+[dependencies]
+gpio_core = { path = "../gpio_core" }
+tokio.workspace = true
+anyhow.workspace = true
