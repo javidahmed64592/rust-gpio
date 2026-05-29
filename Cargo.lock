@@ -192,6 +192,7 @@ dependencies = [
  "anyhow",
  "controller",
  "gpio_core",
+ "sensors",
  "tokio",
 ]
 
@@ -213,6 +214,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gpio_core",
+ "rppal",
  "tokio",
 ]
 

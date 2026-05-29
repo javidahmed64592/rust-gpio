@@ -45,24 +45,19 @@ async fn main() -> Result<()> {
     });
     println!("  ✓ Controller spawned");
 
-    // TODO: Spawn PIR sensor task
-    // let pir_handle = tokio::spawn(async move {
-    //     if let Err(e) = sensors::run_pir_sensor(event_tx.clone()).await {
-    //         eprintln!("PIR sensor error: {}", e);
-    //     }
-    // });
+    // Spawn PIR sensor task
+    let pir_handle = tokio::spawn(async move {
+        if let Err(e) = sensors::run_pir_sensor(event_tx).await {
+            eprintln!("PIR sensor error: {}", e);
+        }
+    });
+    println!("  ✓ PIR sensor spawned");
 
     println!("\n=== System Ready ===");
-    println!("Waiting for sensor events...\n");
-    println!("Press Ctrl+C to shut down\n");
-
-    // Send a test event to demonstrate the system works
-    println!("=== Sending test event to demonstrate system ===");
-    event_tx.send(Event::MotionDetected).await?;
-    println!("Sent MotionDetected event\n");
-
-    // Wait a moment to see the LED turn on
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+    println!("All components running.");
+    println!("PIR sensor is monitoring for motion...");
+    println!("Wave your hand near the PIR sensor to test!");
+    println!("\nPress Ctrl+C to shut down\n");
 
     // Wait for Ctrl+C
     tokio::signal::ctrl_c().await?;
@@ -70,11 +65,8 @@ async fn main() -> Result<()> {
     println!("\n\nShutdown signal received...");
     println!("Stopping all components...");
 
-    // Drop event_tx to signal the controller to exit
-    drop(event_tx);
-
     // Wait for tasks to finish gracefully
-    let _ = tokio::join!(led_handle, controller_handle);
+    let _ = tokio::join!(led_handle, controller_handle, pir_handle);
 
     println!("\nGPIO System shut down cleanly.");
 
