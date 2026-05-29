@@ -48,7 +48,6 @@ pub async fn run_pir_sensor(event_tx: mpsc::Sender<Event>) -> Result<()> {
                 }
                 Level::Low => {
                     // PIR hardware timeout expired (pin went LOW)
-                    // Don't send MotionExpired - controller handles presence timeout
                     println!("[PIR] PIR sensor pin LOW (hardware timeout)");
                 }
             }
