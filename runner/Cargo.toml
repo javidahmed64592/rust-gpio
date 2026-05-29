@@ -10,5 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 gpio_core = { path = "../gpio_core" }
+controller = { path = "../controller" }
+actuators = { path = "../actuators" }
 tokio.workspace = true
 anyhow.workspace = true
