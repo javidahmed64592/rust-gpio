@@ -15,4 +15,4 @@ mpu6050:
 
 system:
   presence_timeout_secs: 120
-  default_brightness: 80
+  default_brightness: 100
