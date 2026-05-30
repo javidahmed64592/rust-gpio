@@ -5,10 +5,10 @@
 mod brightness_impl;
 mod button_controller;
 mod lighting_override_impl;
-mod pir_impl;
+mod pir_sensor_controller;
 
-// Re-export the main run functions and button controller
+// Re-export the main run functions and controllers
 pub use brightness_impl::run_brightness_button;
 pub use button_controller::{ButtonController, run_button};
 pub use lighting_override_impl::run_lighting_override_button;
-pub use pir_impl::run_pir_sensor;
+pub use pir_sensor_controller::{PirSensorController, run_pir_sensor};
