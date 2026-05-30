@@ -18,8 +18,6 @@ pub enum Event {
     LightingModeTogglePressed,
     /// Brightness adjustment button was pressed
     BrightnessButtonPressed,
-    /// MPU6050 tilt update
-    TiltUpdated { pitch: f32, roll: f32 },
 }
 
 /// Commands sent to actuators
@@ -54,7 +52,6 @@ pub enum LightingMode {
 pub struct Config {
     pub gpio: GpioConfig,
     pub lcd: LcdConfig,
-    pub mpu6050: Mpu6050Config,
     pub system: SystemConfig,
 }
 
@@ -84,11 +81,6 @@ pub struct PirConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LcdConfig {
     pub i2c_address: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Mpu6050Config {
-    pub i2c_bus: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

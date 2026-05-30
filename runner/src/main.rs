@@ -171,8 +171,8 @@ async fn main() -> Result<()> {
     println!("");
     println!("Controls:");
     println!("  • PIR sensor: Wave hand to trigger motion detection");
-    println!("  • Override button (GPIO 21): Toggle Automatic/Manual mode");
-    println!("  • Brightness button (GPIO 20): Cycle brightness (25% → 50% → 75% → 100%)");
+    println!("  • Override button: Toggle Automatic/Manual mode");
+    println!("  • Brightness button: Cycle brightness (25% → 50% → 75% → 100%)");
     println!("\nPress Ctrl+C to shut down\n");
 
     // Wait for Ctrl+C
@@ -186,6 +186,11 @@ async fn main() -> Result<()> {
     let _ = shutdown_led_tx.send(gpio_core::Command::LedOff).await;
     let _ = shutdown_lcd_tx.send(gpio_core::Command::DisplayOff).await;
     let _ = shutdown_lcd_tx.send(gpio_core::Command::ClearDisplay).await;
+
+    // Give actuators time to process shutdown commands
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Broadcast shutdown signal to all tasks
     let _ = shutdown_tx.send(());
 
     // Drop the main event_tx to ensure controller can exit after processing remaining events

@@ -40,7 +40,6 @@ pub async fn run_controller(
                     Event::MotionDetected => "Motion Detected".to_string(),
                     Event::LightingModeTogglePressed => "Mode Toggle".to_string(),
                     Event::BrightnessButtonPressed => "Brightness Adj".to_string(),
-                    Event::TiltUpdated { pitch, roll } => format!("P:{:.1} R:{:.1}", pitch, roll),
                 };
 
                 if let Err(e) = lcd_tx.send(Command::DisplayText {
@@ -205,14 +204,6 @@ fn handle_event(
             if state.presence_detected {
                 commands.push(Command::SetBrightness(state.brightness_level));
             }
-        }
-
-        Event::TiltUpdated { pitch, roll } => {
-            println!(
-                "[Controller] Tilt update: pitch={:.2}, roll={:.2}",
-                pitch, roll
-            );
-            // TODO: Future implementation - could trigger alerts or display updates
         }
     }
 

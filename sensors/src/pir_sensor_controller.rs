@@ -1,4 +1,4 @@
-//! PIR Sensor Controller Module
+//! Generic PIR Sensor Controller Module
 
 use anyhow::Result;
 use gpio_core::Event;

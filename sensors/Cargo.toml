@@ -12,12 +12,8 @@ name = "button-test"
 path = "src/bin/button_test.rs"
 
 [[bin]]
-name = "pir-sensor"
+name = "pir-test"
 path = "src/bin/pir_test.rs"
-
-[[bin]]
-name = "mpu6050-sensor"
-path = "src/mpu6050.rs"
 
 [dependencies]
 gpio_core = { path = "../gpio_core" }
