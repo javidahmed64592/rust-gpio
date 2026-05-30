@@ -9,6 +9,62 @@
 
 use serde::{Deserialize, Serialize};
 
+/// RGB color representation with 0-100 intensity for each channel
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RgbColor {
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+}
+
+impl RgbColor {
+    /// Create a new RGB color with specified intensities (0-100)
+    pub fn new(red: u8, green: u8, blue: u8) -> Self {
+        Self {
+            red: red.min(100),
+            green: green.min(100),
+            blue: blue.min(100),
+        }
+    }
+
+    /// Predefined color: Red (for errors)
+    pub fn red() -> Self {
+        Self::new(100, 0, 0)
+    }
+
+    /// Predefined color: Green (for normal operation)
+    pub fn green() -> Self {
+        Self::new(0, 100, 0)
+    }
+
+    /// Predefined color: Blue (for motion detected)
+    pub fn blue() -> Self {
+        Self::new(0, 0, 100)
+    }
+
+    /// Predefined color: Orange (for system busy)
+    pub fn orange() -> Self {
+        Self::new(100, 50, 0)
+    }
+
+    /// Predefined color: Off (all channels at 0)
+    pub fn off() -> Self {
+        Self::new(0, 0, 0)
+    }
+
+    /// Scale all color channels by a brightness percentage (0-100)
+    pub fn with_brightness(&self, brightness: u8) -> Self {
+        let brightness = brightness.min(100);
+        let scale = brightness as f64 / 100.0;
+
+        Self::new(
+            (self.red as f64 * scale) as u8,
+            (self.green as f64 * scale) as u8,
+            (self.blue as f64 * scale) as u8,
+        )
+    }
+}
+
 /// Events emitted by sensors
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
@@ -32,11 +88,19 @@ pub enum Command {
     /// Blink LED to indicate error (times to blink)
     LedBlinkError(u8),
 
+    /// Turn RGB LED on at previous color and brightness
+    RgbLedOn,
+    /// Turn RGB LED off
+    RgbLedOff,
+    /// Set RGB LED color (current brightness applies)
+    SetRgbColor(RgbColor),
+    /// Set RGB LED brightness (0-100)
+    SetRgbBrightness(u8),
+    /// Blink RGB LED in red to indicate error
+    RgbLedBlinkError(u8),
+
     /// Display text on specified LCD line
-    DisplayText {
-        line: u8,
-        text: String,
-    },
+    DisplayText { line: u8, text: String },
     /// Clear all text from LCD
     ClearDisplay,
     /// Turn LCD backlight on
@@ -70,6 +134,8 @@ pub struct Config {
 pub struct GpioConfig {
     /// LED pin configuration
     pub led: LedPinConfig,
+    /// RGB LED pin configuration
+    pub rgb_led: RgbLedPinConfig,
     /// Button pin configurations
     pub button: ButtonPinConfig,
     /// PIR sensor configuration
@@ -81,6 +147,24 @@ pub struct GpioConfig {
 pub struct LedPinConfig {
     /// GPIO pin number for PIR-controlled LED
     pub pir_led_pin: u8,
+}
+
+/// RGB LED GPIO pin configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RgbLedPinConfig {
+    /// Nested system RGB LED configuration
+    pub system: SystemRgbLedPins,
+}
+
+/// System RGB LED pin assignments
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemRgbLedPins {
+    /// GPIO pin for red channel
+    pub red_pin: u8,
+    /// GPIO pin for green channel
+    pub green_pin: u8,
+    /// GPIO pin for blue channel
+    pub blue_pin: u8,
 }
 
 /// Button GPIO pin configurations
