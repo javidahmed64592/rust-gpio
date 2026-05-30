@@ -12,8 +12,8 @@ name = "led-test"
 path = "src/bin/led_test.rs"
 
 [[bin]]
-name = "lcd-actuator"
-path = "src/lcd.rs"
+name = "lcd-test"
+path = "src/bin/lcd_test.rs"
 
 [dependencies]
 gpio_core = { path = "../gpio_core" }

@@ -12,6 +12,7 @@ use tokio::time::{Duration, interval};
 pub async fn run_controller(
     mut event_rx: mpsc::Receiver<Event>,
     led_tx: mpsc::Sender<Command>,
+    lcd_tx: mpsc::Sender<Command>,
 ) -> Result<()> {
     // Load config
     let config = load_config("config/config.yaml")?;
@@ -34,14 +35,56 @@ pub async fn run_controller(
             Some(event) = event_rx.recv() => {
                 println!("[Controller] Event received: {:?}", event);
 
+                // Send event info to LCD (top row - line 0)
+                let event_text = match &event {
+                    Event::MotionDetected => "Motion Detected".to_string(),
+                    Event::LightingModeTogglePressed => "Mode Toggle".to_string(),
+                    Event::BrightnessButtonPressed => "Brightness Adj".to_string(),
+                    Event::TiltUpdated { pitch, roll } => format!("P:{:.1} R:{:.1}", pitch, roll),
+                };
+
+                if let Err(e) = lcd_tx.send(Command::DisplayText {
+                    line: 0,
+                    text: event_text,
+                }).await {
+                    eprintln!("[Controller] Error sending event to LCD: {}", e);
+                }
+
                 // Handle the event and get commands to send
                 let commands = handle_event(event, &mut state, &config);
 
                 // Send commands to actuators
                 for command in commands {
                     println!("[Controller] Sending command: {:?}", command);
-                    if let Err(e) = led_tx.send(command).await {
-                        eprintln!("[Controller] Error sending command: {}", e);
+
+                    // Send LED commands to LED actuator
+                    if matches!(command, Command::LedOn | Command::LedOff | Command::SetBrightness(_)) {
+                        if let Err(e) = led_tx.send(command.clone()).await {
+                            eprintln!("[Controller] Error sending to LED: {}", e);
+                        }
+
+                        // Also send command description to LCD (bottom row - line 1)
+                        let cmd_text = match &command {
+                            Command::LedOn => "LED: ON".to_string(),
+                            Command::LedOff => "LED: OFF".to_string(),
+                            Command::SetBrightness(level) => format!("Brightness: {}%", level),
+                            _ => String::new(),
+                        };
+                        if !cmd_text.is_empty() {
+                            if let Err(e) = lcd_tx.send(Command::DisplayText {
+                                line: 1,
+                                text: cmd_text,
+                            }).await {
+                                eprintln!("[Controller] Error sending command to LCD: {}", e);
+                            }
+                        }
+                    }
+
+                    // Send display control commands to LCD
+                    if matches!(command, Command::DisplayOn | Command::DisplayOff) {
+                        if let Err(e) = lcd_tx.send(command).await {
+                            eprintln!("[Controller] Error sending to LCD: {}", e);
+                        }
                     }
                 }
             }
@@ -59,11 +102,21 @@ pub async fn run_controller(
                             );
                             state.presence_detected = false;
 
-                            // In Automatic mode, turn LED off when presence expires
+                            // In Automatic mode, turn LED and LCD off when presence expires
                             if state.lighting_mode == LightingMode::Automatic {
-                                println!("[Controller] Automatic mode: turning LED OFF");
+                                println!("[Controller] Automatic mode: turning LED and LCD OFF");
                                 if let Err(e) = led_tx.send(Command::LedOff).await {
                                     eprintln!("[Controller] Error sending LedOff command: {}", e);
+                                }
+                                // Send command description to LCD
+                                if let Err(e) = lcd_tx.send(Command::DisplayText {
+                                    line: 1,
+                                    text: "LED: OFF".to_string(),
+                                }).await {
+                                    eprintln!("[Controller] Error sending to LCD: {}", e);
+                                }
+                                if let Err(e) = lcd_tx.send(Command::DisplayOff).await {
+                                    eprintln!("[Controller] Error sending DisplayOff command: {}", e);
                                 }
                             }
                         }
@@ -100,11 +153,12 @@ fn handle_event(
             state.presence_detected = true;
             state.last_motion_time = Some(Instant::now());
 
-            // In Automatic mode, turn LED on when motion detected
+            // In Automatic mode, turn LED and LCD on when motion detected
             if state.lighting_mode == LightingMode::Automatic {
                 if !was_present {
-                    println!("[Controller] Automatic mode: turning LED ON");
+                    println!("[Controller] Automatic mode: turning LED and LCD ON");
                     commands.push(Command::LedOn);
+                    commands.push(Command::DisplayOn);
                 } else {
                     println!("[Controller] Presence extended (LED already on)");
                 }
@@ -115,16 +169,18 @@ fn handle_event(
             // Toggle between Automatic and Manual Override
             state.lighting_mode = match state.lighting_mode {
                 LightingMode::Automatic => {
-                    println!("[Controller] Switching to Manual Override - turning LED OFF");
+                    println!("[Controller] Switching to Manual Override - turning LED and LCD OFF");
                     commands.push(Command::LedOff);
+                    commands.push(Command::DisplayOff);
                     LightingMode::ManualOverride
                 }
                 LightingMode::ManualOverride => {
                     println!("[Controller] Switching to Automatic mode");
-                    // If presence is detected, turn LED back on
+                    // If presence is detected, turn LED and LCD back on
                     if state.presence_detected {
-                        println!("[Controller] Presence detected - turning LED ON");
+                        println!("[Controller] Presence detected - turning LED and LCD ON");
                         commands.push(Command::LedOn);
+                        commands.push(Command::DisplayOn);
                     }
                     LightingMode::Automatic
                 }

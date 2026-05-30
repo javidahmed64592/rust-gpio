@@ -11,10 +11,11 @@ async fn main() -> Result<()> {
     // For standalone testing, create channels and send test events
     let (event_tx, event_rx) = mpsc::channel(32);
     let (led_tx, mut led_rx) = mpsc::channel(32);
+    let (lcd_tx, mut lcd_rx) = mpsc::channel(32);
 
     // Spawn the controller
     let controller_handle =
-        tokio::spawn(async move { controller::run_controller(event_rx, led_tx).await });
+        tokio::spawn(async move { controller::run_controller(event_rx, led_tx, lcd_tx).await });
 
     // Send some test events
     println!("\n=== Standalone Controller Test ===");
@@ -23,9 +24,12 @@ async fn main() -> Result<()> {
     event_tx.send(Event::MotionDetected).await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-    // Receive and print commands
+    // Receive and print commands from both channels
     while let Ok(cmd) = led_rx.try_recv() {
-        println!("Received command: {:?}", cmd);
+        println!("LED command: {:?}", cmd);
+    }
+    while let Ok(cmd) = lcd_rx.try_recv() {
+        println!("LCD command: {:?}", cmd);
     }
 
     println!("\nTest complete. Press Ctrl+C to exit.");

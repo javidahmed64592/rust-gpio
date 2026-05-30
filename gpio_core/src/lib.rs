@@ -36,6 +36,8 @@ pub enum Command {
         text: String,
     },
     ClearDisplay,
+    DisplayOn,
+    DisplayOff,
 }
 
 /// Lighting control mode
