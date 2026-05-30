@@ -1,10 +1,7 @@
-//! Generic Button Implementation Module
+//! Generic Button Controller Module
 
 use anyhow::Result;
-use gpio_core::Event;
 use rppal::gpio::{Gpio, InputPin, Level};
-use tokio::sync::mpsc;
-use tokio::time::{Duration, sleep};
 
 /// Generic button controller for any GPIO pin
 pub struct ButtonController {
@@ -46,46 +43,4 @@ impl ButtonController {
 
         pressed
     }
-}
-
-/// Run a generic button with configurable GPIO pin and event emission
-///
-/// # Arguments
-/// * `pin_number` - GPIO pin number the button is connected to
-/// * `event` - Event to emit when button is pressed
-/// * `label` - Label for logging (e.g., "Brightness", "Override")
-/// * `event_tx` - Channel to send events through
-pub async fn run_button(
-    pin_number: u8,
-    event: Event,
-    label: &str,
-    event_tx: mpsc::Sender<Event>,
-) -> Result<()> {
-    // Initialize button controller
-    let mut button = ButtonController::new(pin_number, label)?;
-
-    println!("[{}] Ready! Press button to emit event.", label);
-
-    // Debounce time
-    const DEBOUNCE_MS: u64 = 300;
-
-    loop {
-        // Check for button press
-        if button.is_pressed() {
-            // Send event
-            if let Err(e) = event_tx.send(event.clone()).await {
-                eprintln!("[{}] Failed to send event: {}", label, e);
-                break;
-            }
-
-            // Debounce - wait before checking again
-            sleep(Duration::from_millis(DEBOUNCE_MS)).await;
-        }
-
-        // Poll every 50ms
-        sleep(Duration::from_millis(50)).await;
-    }
-
-    println!("[{}] Shutting down...", label);
-    Ok(())
 }

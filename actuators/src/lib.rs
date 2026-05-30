@@ -1,10 +1,8 @@
 //! Actuators library
 //!
-//! Provides actuator functions that can be spawned as tasks.
+//! Provides generic hardware controller abstractions for output devices.
 
 mod led_controller;
-mod pir_led_impl;
 
-// Re-export the main run function and LED controller
+// Re-export hardware controllers
 pub use led_controller::LedController;
-pub use pir_led_impl::run_pir_led_actuator;

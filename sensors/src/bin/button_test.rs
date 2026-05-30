@@ -4,9 +4,9 @@
 //! This allows testing that buttons are wired correctly and detecting button presses.
 
 use anyhow::{Context, Result};
-use gpio_core::Event;
+use sensors::ButtonController;
 use std::env;
-use tokio::sync::mpsc;
+use tokio::time::{Duration, sleep};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -40,42 +40,23 @@ async fn main() -> Result<()> {
     println!("  • Use 300ms debounce to prevent double-triggering");
     println!("\nPress Ctrl+C to exit\n");
 
-    // Create a channel for testing
-    let (event_tx, mut event_rx) = mpsc::channel::<Event>(32);
+    // Initialize button controller
+    let mut button = ButtonController::new(pin_number, "Button Test")?;
 
-    // Spawn the button task
-    let button_handle = tokio::spawn(async move {
-        if let Err(e) = sensors::run_button(
-            pin_number,
-            Event::LightingModeTogglePressed, // Dummy event for testing
-            "Button Test",
-            event_tx,
-        )
-        .await
-        {
-            eprintln!("Button error: {}", e);
-        }
-    });
+    let mut press_count = 0;
+    const DEBOUNCE_MS: u64 = 300;
 
-    // Listen for events and print them
-    let event_handle = tokio::spawn(async move {
-        let mut press_count = 0;
-        while let Some(event) = event_rx.recv().await {
+    // Poll for button presses
+    loop {
+        if button.is_pressed() {
             press_count += 1;
-            println!(
-                "✓ Button press #{} detected! Event: {:?}",
-                press_count, event
-            );
+            println!("✓ Button press #{} detected!", press_count);
+
+            // Debounce
+            sleep(Duration::from_millis(DEBOUNCE_MS)).await;
         }
-    });
 
-    // Wait for Ctrl+C
-    tokio::signal::ctrl_c().await?;
-    println!("\n\nShutdown signal received...");
-
-    // Wait for tasks to finish
-    let _ = tokio::join!(button_handle, event_handle);
-
-    println!("Button test complete!");
-    Ok(())
+        // Poll every 50ms
+        sleep(Duration::from_millis(50)).await;
+    }
 }

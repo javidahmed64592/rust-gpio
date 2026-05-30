@@ -11,9 +11,19 @@
 //!
 //! Contains minimal business logic - primarily dependency injection and orchestration.
 
+mod brightness_button;
+mod lighting_override_button;
+mod pir_led_actuator;
+mod pir_sensor;
+
 use anyhow::Result;
 use gpio_core::Event;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
+
+use brightness_button::run_brightness_button;
+use lighting_override_button::run_lighting_override_button;
+use pir_led_actuator::run_pir_led_actuator;
+use pir_sensor::run_pir_sensor;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,52 +37,108 @@ async fn main() -> Result<()> {
     // Command channel: controller -> PIR LED actuator
     let (pir_led_cmd_tx, pir_led_cmd_rx) = mpsc::channel(32);
 
+    // Shutdown signal channel
+    let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
     println!("Spawning components...");
-
-    // Spawn controller task
-    let controller_handle = tokio::spawn(async move {
-        if let Err(e) = controller::run_controller(event_rx, pir_led_cmd_tx).await {
-            eprintln!("Controller error: {}", e);
-        }
-    });
-    println!("  ✓ Controller spawned");
-
-    // Spawn PIR LED actuator task
-    let pir_led_handle = tokio::spawn(async move {
-        if let Err(e) = actuators::run_pir_led_actuator(pir_led_cmd_rx).await {
-            eprintln!("PIR LED actuator error: {}", e);
-        }
-    });
-    println!("  ✓ PIR LED actuator spawned");
 
     // Clone event_tx for each sensor
     let pir_event_tx = event_tx.clone();
     let override_event_tx = event_tx.clone();
-    let brightness_event_tx = event_tx;
+    let brightness_event_tx = event_tx.clone();
+
+    // Clone shutdown receiver for each task
+    let pir_shutdown = shutdown_tx.subscribe();
+    let override_shutdown = shutdown_tx.subscribe();
+    let brightness_shutdown = shutdown_tx.subscribe();
+    let controller_shutdown = shutdown_tx.subscribe();
+    let led_shutdown = shutdown_tx.subscribe();
+
+    // === SENSORS ===
 
     // Spawn PIR sensor task
     let pir_handle = tokio::spawn(async move {
-        if let Err(e) = sensors::run_pir_sensor(pir_event_tx).await {
-            eprintln!("PIR sensor error: {}", e);
+        let mut shutdown = pir_shutdown;
+        tokio::select! {
+            result = run_pir_sensor(pir_event_tx) => {
+                if let Err(e) = result {
+                    eprintln!("PIR sensor error: {}", e);
+                }
+            }
+            _ = shutdown.recv() => {
+                println!("[PIR] Shutdown signal received");
+            }
         }
     });
     println!("  ✓ PIR sensor spawned");
 
     // Spawn lighting override button task
     let override_handle = tokio::spawn(async move {
-        if let Err(e) = sensors::run_lighting_override_button(override_event_tx).await {
-            eprintln!("Lighting override button error: {}", e);
+        let mut shutdown = override_shutdown;
+        tokio::select! {
+            result = run_lighting_override_button(override_event_tx) => {
+                if let Err(e) = result {
+                    eprintln!("Lighting override button error: {}", e);
+                }
+            }
+            _ = shutdown.recv() => {
+                println!("[Lighting Override] Shutdown signal received");
+            }
         }
     });
     println!("  ✓ Lighting override button spawned");
 
     // Spawn brightness button task
     let brightness_handle = tokio::spawn(async move {
-        if let Err(e) = sensors::run_brightness_button(brightness_event_tx).await {
-            eprintln!("Brightness button error: {}", e);
+        let mut shutdown = brightness_shutdown;
+        tokio::select! {
+            result = run_brightness_button(brightness_event_tx) => {
+                if let Err(e) = result {
+                    eprintln!("Brightness button error: {}", e);
+                }
+            }
+            _ = shutdown.recv() => {
+                println!("[Brightness Button] Shutdown signal received");
+            }
         }
     });
     println!("  ✓ Brightness button spawned");
+
+    // === CONTROLLER ===
+
+    // Spawn controller task
+    let controller_handle = tokio::spawn(async move {
+        let mut shutdown = controller_shutdown;
+        tokio::select! {
+            result = controller::run_controller(event_rx, pir_led_cmd_tx) => {
+                if let Err(e) = result {
+                    eprintln!("Controller error: {}", e);
+                }
+            }
+            _ = shutdown.recv() => {
+                println!("[Controller] Shutdown signal received");
+            }
+        }
+    });
+    println!("  ✓ Controller spawned");
+
+    // === ACTUATORS ===
+
+    // Spawn PIR LED actuator task
+    let pir_led_handle = tokio::spawn(async move {
+        let mut shutdown = led_shutdown;
+        tokio::select! {
+            result = run_pir_led_actuator(pir_led_cmd_rx) => {
+                if let Err(e) = result {
+                    eprintln!("PIR LED actuator error: {}", e);
+                }
+            }
+            _ = shutdown.recv() => {
+                println!("[PIR LED] Shutdown signal received");
+            }
+        }
+    });
+    println!("  ✓ PIR LED actuator spawned");
 
     println!("\n=== System Ready ===");
     println!("All components running.");
@@ -89,13 +155,19 @@ async fn main() -> Result<()> {
     println!("\n\nShutdown signal received...");
     println!("Stopping all tasks...");
 
-    // Wait for tasks to finish gracefully
+    // Broadcast shutdown signal to all tasks
+    let _ = shutdown_tx.send(());
+
+    // Drop the main event_tx to ensure controller can exit after processing remaining events
+    drop(event_tx);
+
+    // Wait for all tasks to finish gracefully
     let _ = tokio::join!(
-        pir_led_handle,
-        controller_handle,
         pir_handle,
         override_handle,
-        brightness_handle
+        brightness_handle,
+        controller_handle,
+        pir_led_handle
     );
 
     println!("\nGPIO System shut down cleanly.");

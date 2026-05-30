@@ -8,12 +8,12 @@ license.workspace = true
 path = "src/lib.rs"
 
 [[bin]]
-name = "pir-sensor"
-path = "src/pir.rs"
-
-[[bin]]
 name = "button-test"
 path = "src/bin/button_test.rs"
+
+[[bin]]
+name = "pir-sensor"
+path = "src/bin/pir_test.rs"
 
 [[bin]]
 name = "mpu6050-sensor"
