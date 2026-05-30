@@ -14,6 +14,8 @@
 mod brightness_button;
 mod lcd_display;
 mod lighting_override_button;
+mod pattern_button;
+mod pattern_executor;
 mod pir_sensor;
 mod rgb_led_actuator;
 
@@ -24,6 +26,8 @@ use tokio::sync::{broadcast, mpsc};
 use brightness_button::run_brightness_button;
 use lcd_display::run_lcd_display;
 use lighting_override_button::run_lighting_override_button;
+use pattern_button::run_pattern_button;
+use pattern_executor::run_pattern_executor;
 use pir_sensor::run_pir_sensor;
 use rgb_led_actuator::run_rgb_led_actuator;
 
@@ -42,6 +46,12 @@ async fn main() -> Result<()> {
     // Command channel: controller -> LCD actuator
     let (lcd_cmd_tx, lcd_cmd_rx) = mpsc::channel(32);
 
+    // Pattern channel: controller -> pattern executor (pattern_index, brightness)
+    let (pattern_tx, pattern_rx) = mpsc::channel::<(usize, u8, bool)>(32); // (pattern_index, brightness, paused)
+
+    // Pattern LED channel: pattern executor -> RGB LED (merged with controller commands)
+    let (pattern_led_tx, pattern_led_rx) = mpsc::channel(32);
+
     // Shutdown signal channel
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
@@ -51,12 +61,16 @@ async fn main() -> Result<()> {
     let pir_event_tx = event_tx.clone();
     let override_event_tx = event_tx.clone();
     let brightness_event_tx = event_tx.clone();
+    let pattern_event_tx = event_tx.clone();
 
     // Clone shutdown receiver for each task
     let pir_shutdown = shutdown_tx.subscribe();
     let override_shutdown = shutdown_tx.subscribe();
     let brightness_shutdown = shutdown_tx.subscribe();
+    let pattern_button_shutdown = shutdown_tx.subscribe();
     let controller_shutdown = shutdown_tx.subscribe();
+    let pattern_executor_shutdown = shutdown_tx.subscribe();
+    let led_mux_shutdown = shutdown_tx.subscribe();
     let led_shutdown = shutdown_tx.subscribe();
     let lcd_shutdown = shutdown_tx.subscribe();
 
@@ -110,17 +124,32 @@ async fn main() -> Result<()> {
     });
     println!("  ✓ Brightness button spawned");
 
+    // Spawn pattern cycle button task
+    let pattern_button_handle = tokio::spawn(async move {
+        let mut shutdown = pattern_button_shutdown;
+        tokio::select! {
+            result = run_pattern_button(pattern_event_tx) => {
+                if let Err(e) = result {
+                    eprintln!("Pattern button error: {}", e);
+                }
+            }
+            _ = shutdown.recv() => {
+                println!("[Pattern Button] Shutdown signal received");
+            }
+        }
+    });
+    println!("  ✓ Pattern cycle button spawned");
+
     // === CONTROLLER ===
 
     // Clone command senders so we can use them for shutdown
-    let shutdown_led_tx = rgb_led_cmd_tx.clone();
     let shutdown_lcd_tx = lcd_cmd_tx.clone();
 
     // Spawn controller task
     let controller_handle = tokio::spawn(async move {
         let mut shutdown = controller_shutdown;
         tokio::select! {
-            result = controller::run_controller(event_rx, rgb_led_cmd_tx, lcd_cmd_tx) => {
+            result = controller::run_controller(event_rx, rgb_led_cmd_tx, lcd_cmd_tx, pattern_tx) => {
                 if let Err(e) = result {
                     eprintln!("Controller error: {}", e);
                 }
@@ -132,13 +161,75 @@ async fn main() -> Result<()> {
     });
     println!("  ✓ Controller spawned");
 
+    // === PATTERN EXECUTOR ===
+
+    // Spawn pattern executor task
+    let pattern_executor_handle = tokio::spawn(async move {
+        let mut shutdown = pattern_executor_shutdown;
+        tokio::select! {
+            result = run_pattern_executor(pattern_rx, pattern_led_tx) => {
+                if let Err(e) = result {
+                    eprintln!("Pattern executor error: {}", e);
+                }
+            }
+            _ = shutdown.recv() => {
+                println!("[Pattern Executor] Shutdown signal received");
+            }
+        }
+    });
+    println!("  ✓ Pattern executor spawned");
+
+    // === LED COMMAND MULTIPLEXER ===
+
+    // Create merged channel for RGB LED (merges controller and pattern commands)
+    let (merged_led_tx, merged_led_rx) = mpsc::channel(64);
+    let merged_led_tx_clone = merged_led_tx.clone();
+
+    // Spawn multiplexer task to merge controller and pattern commands
+    let led_mux_handle = tokio::spawn(async move {
+        let mut shutdown = led_mux_shutdown;
+        let mut ctrl_rx = rgb_led_cmd_rx;
+        let mut pattern_rx = pattern_led_rx;
+        let tx = merged_led_tx;
+
+        tokio::select! {
+            _ = async {
+                loop {
+                    tokio::select! {
+                        Some(cmd) = ctrl_rx.recv() => {
+                            // Controller commands have priority (for overrides)
+                            if let Err(e) = tx.send(cmd).await {
+                                eprintln!("[LED Mux] Error forwarding controller command: {}", e);
+                                break;
+                            }
+                        }
+                        Some(cmd) = pattern_rx.recv() => {
+                            // Pattern commands
+                            if let Err(e) = tx.send(cmd).await {
+                                eprintln!("[LED Mux] Error forwarding pattern command: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } => {}
+            _ = shutdown.recv() => {
+                println!("[LED Mux] Shutdown signal received");
+            }
+        }
+    });
+    println!("  ✓ LED command multiplexer spawned");
+
     // === ACTUATORS ===
 
-    // Spawn RGB LED actuator task
+    // Clone for shutdown
+    let shutdown_led_tx = merged_led_tx_clone.clone();
+
+    // Spawn RGB LED actuator task (receives merged commands from controller and pattern executor)
     let rgb_led_handle = tokio::spawn(async move {
         let mut shutdown = led_shutdown;
         tokio::select! {
-            result = run_rgb_led_actuator(rgb_led_cmd_rx) => {
+            result = run_rgb_led_actuator(merged_led_rx) => {
                 if let Err(e) = result {
                     eprintln!("RGB LED actuator error: {}", e);
                 }
@@ -173,6 +264,7 @@ async fn main() -> Result<()> {
     println!("  • PIR sensor: Wave hand to trigger motion detection");
     println!("  • Override button: Toggle Automatic/Manual mode");
     println!("  • Brightness button: Cycle brightness (25% → 50% → 75% → 100%)");
+    println!("  • Pattern button: Cycle lighting patterns");
     println!("\nPress Ctrl+C to shut down\n");
 
     // Wait for Ctrl+C
@@ -201,7 +293,10 @@ async fn main() -> Result<()> {
         pir_handle,
         override_handle,
         brightness_handle,
+        pattern_button_handle,
         controller_handle,
+        pattern_executor_handle,
+        led_mux_handle,
         rgb_led_handle,
         lcd_handle
     );

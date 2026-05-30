@@ -94,15 +94,6 @@ impl RgbLedController {
         if let Err(e) = self.blue_pin.set_pwm_frequency(100.0, blue_duty) {
             eprintln!("[{}] Failed to set blue PWM: {}", self.label, e);
         }
-
-        println!(
-            "[{}] Color: R:{} G:{} B:{} (brightness: {}%)",
-            self.label,
-            scaled_color.red,
-            scaled_color.green,
-            scaled_color.blue,
-            self.current_brightness
-        );
     }
 
     /// Set overall brightness level (0-100) without changing color
@@ -114,11 +105,6 @@ impl RgbLedController {
 
         // Re-apply current color with new brightness
         self.set_color(self.current_color);
-
-        println!(
-            "[{}] Brightness adjusted to: {}%",
-            self.label, self.current_brightness
-        );
     }
 
     /// Blink LED rapidly in red to indicate an error condition

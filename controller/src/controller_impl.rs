@@ -3,7 +3,9 @@
 //! Central decision-making logic for the GPIO system.
 
 use anyhow::Result;
-use gpio_core::{Command, Event, LightingMode, RgbColor, SystemState, load_config};
+use gpio_core::{
+    Command, Event, LightingMode, LightingPatternConfig, RgbColor, SystemState, load_config,
+};
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, interval};
@@ -14,6 +16,7 @@ use tokio::time::{Duration, interval};
 /// * `event_rx` - Channel to receive events from sensors
 /// * `led_tx` - Channel to send commands to LED actuator
 /// * `lcd_tx` - Channel to send commands to LCD display
+/// * `pattern_tx` - Channel to send pattern updates (pattern_index, brightness, paused)
 ///
 /// # Behavior
 /// Central brain that processes events, maintains state, and generates commands
@@ -21,6 +24,7 @@ pub async fn run_controller(
     mut event_rx: mpsc::Receiver<Event>,
     led_tx: mpsc::Sender<Command>,
     lcd_tx: mpsc::Sender<Command>,
+    pattern_tx: mpsc::Sender<(usize, u8, bool)>,
 ) -> Result<()> {
     // Load config
     let config = load_config("config/config.yaml")?;
@@ -28,6 +32,10 @@ pub async fn run_controller(
     // Initialize system state with config values
     let mut state = SystemState::default();
     state.brightness_level = config.system.default_brightness;
+    state.current_pattern_index = config
+        .system
+        .default_pattern_index
+        .min(config.lighting_patterns.len().saturating_sub(1));
 
     // Set initial brightness index to match default brightness
     if let Some(idx) = config
@@ -39,6 +47,14 @@ pub async fn run_controller(
         state.brightness_index = idx;
     }
 
+    // Send initial pattern to executor (not paused initially)
+    if let Err(e) = pattern_tx
+        .send((state.current_pattern_index, state.brightness_level, false))
+        .await
+    {
+        eprintln!("[Controller] Failed to send initial pattern: {}", e);
+    }
+
     println!("[Controller] Ready!");
     println!(
         "[Controller] Presence timeout: {} seconds",
@@ -48,6 +64,20 @@ pub async fn run_controller(
         "[Controller] Brightness levels: {:?}",
         config.system.brightness_levels
     );
+    println!(
+        "[Controller] Lighting patterns: {} available",
+        config.lighting_patterns.len()
+    );
+
+    if !config.lighting_patterns.is_empty() {
+        let initial_pattern_name = &config.lighting_patterns[state.current_pattern_index].name();
+        println!(
+            "[Controller] Starting with pattern {}/{}: {}",
+            state.current_pattern_index + 1,
+            config.lighting_patterns.len(),
+            initial_pattern_name
+        );
+    }
 
     // Create a timer to check for presence timeout every 5 seconds
     let mut timeout_checker = interval(Duration::from_secs(5));
@@ -63,6 +93,7 @@ pub async fn run_controller(
                     Event::MotionDetected => "Motion Detected",
                     Event::LightingModeTogglePressed => "Mode Toggle",
                     Event::BrightnessButtonPressed => "Brightness Adj",
+                    Event::PatternCyclePressed => "Pattern Cycle",
                 };
 
                 if let Err(e) = lcd_tx.send(Command::DisplayText {
@@ -73,7 +104,7 @@ pub async fn run_controller(
                 }
 
                 // Handle the event and get commands to send
-                let commands = handle_event(event, &mut state, &config);
+                let commands = handle_event(event, &mut state, &config, &pattern_tx).await;
 
                 // Send commands to actuators
                 for command in commands {
@@ -184,8 +215,20 @@ pub async fn run_controller(
 /// * `event` - The sensor event to process
 /// * `state` - Mutable reference to system state
 /// * `config` - System configuration with brightness levels
-fn handle_event(event: Event, state: &mut SystemState, config: &gpio_core::Config) -> Vec<Command> {
+/// * `pattern_tx` - Channel to send pattern updates (pattern_index, brightness, paused)
+async fn handle_event(
+    event: Event,
+    state: &mut SystemState,
+    config: &gpio_core::Config,
+    pattern_tx: &mpsc::Sender<(usize, u8, bool)>,
+) -> Vec<Command> {
     let mut commands = Vec::new();
+
+    // Helper to check if current pattern is EventDriven
+    let is_event_driven = matches!(
+        config.lighting_patterns.get(state.current_pattern_index),
+        Some(LightingPatternConfig::EventDriven)
+    );
 
     match event {
         Event::MotionDetected => {
@@ -196,15 +239,19 @@ fn handle_event(event: Event, state: &mut SystemState, config: &gpio_core::Confi
             state.presence_detected = true;
             state.last_motion_time = Some(Instant::now());
 
-            // In Automatic mode, turn LED and LCD on when motion detected
+            // Handle motion in Automatic mode
             if state.lighting_mode == LightingMode::Automatic {
                 if !was_present {
-                    println!("[Controller] Automatic mode: turning LED and LCD ON");
-                    // Set RGB LED to green (normal operation) and turn on
-                    commands.push(Command::SetRgbColor(RgbColor::green()));
-                    commands.push(Command::RgbLedOn);
+                    println!("[Controller] Presence started - turning displays ON");
                     commands.push(Command::DisplayOn);
-                } else {
+
+                    // For EventDriven patterns, controller manages LED color
+                    if is_event_driven {
+                        commands.push(Command::SetRgbColor(RgbColor::green()));
+                        commands.push(Command::RgbLedOn);
+                    }
+                    // For other patterns, pattern executor handles LED colors
+                } else if is_event_driven {
                     println!("[Controller] Presence extended - flash blue to indicate motion");
                     // Flash blue momentarily to indicate motion was detected
                     commands.push(Command::SetRgbColor(RgbColor::blue()));
@@ -219,17 +266,41 @@ fn handle_event(event: Event, state: &mut SystemState, config: &gpio_core::Confi
                     println!("[Controller] Switching to Manual Override - turning LED and LCD OFF");
                     commands.push(Command::RgbLedOff);
                     commands.push(Command::DisplayOff);
+
+                    // Pause pattern executor updates
+                    if let Err(e) = pattern_tx
+                        .send((state.current_pattern_index, state.brightness_level, true))
+                        .await
+                    {
+                        eprintln!("[Controller] Failed to send pattern pause: {}", e);
+                    }
+
                     LightingMode::ManualOverride
                 }
                 LightingMode::ManualOverride => {
                     println!("[Controller] Switching to Automatic mode");
-                    // If presence is detected, turn LED and LCD back on with green color
-                    if state.presence_detected {
-                        println!("[Controller] Presence detected - turning LED and LCD ON");
-                        commands.push(Command::SetRgbColor(RgbColor::green()));
-                        commands.push(Command::RgbLedOn);
-                        commands.push(Command::DisplayOn);
+
+                    // Resume pattern executor updates
+                    if let Err(e) = pattern_tx
+                        .send((state.current_pattern_index, state.brightness_level, false))
+                        .await
+                    {
+                        eprintln!("[Controller] Failed to send pattern resume: {}", e);
                     }
+
+                    // If presence is detected, turn displays back on
+                    if state.presence_detected {
+                        println!("[Controller] Presence detected - turning displays ON");
+                        commands.push(Command::DisplayOn);
+
+                        // For EventDriven patterns, also manually turn on LED with green
+                        // (other patterns are handled by pattern executor)
+                        if is_event_driven {
+                            commands.push(Command::SetRgbColor(RgbColor::green()));
+                            commands.push(Command::RgbLedOn);
+                        }
+                    }
+
                     LightingMode::Automatic
                 }
             };
@@ -252,9 +323,43 @@ fn handle_event(event: Event, state: &mut SystemState, config: &gpio_core::Confi
                     brightness_levels.len()
                 );
 
-                // Update RGB LED brightness if it's currently on
-                if state.presence_detected {
+                // Send brightness update to pattern executor (preserve pause state)
+                let paused = state.lighting_mode == LightingMode::ManualOverride;
+                if let Err(e) = pattern_tx
+                    .send((state.current_pattern_index, state.brightness_level, paused))
+                    .await
+                {
+                    eprintln!("[Controller] Failed to send brightness update: {}", e);
+                }
+
+                // Also update LED brightness directly for EventDriven patterns
+                if is_event_driven && state.presence_detected {
                     commands.push(Command::SetRgbBrightness(state.brightness_level));
+                }
+            }
+        }
+
+        Event::PatternCyclePressed => {
+            // Cycle to next pattern
+            if !config.lighting_patterns.is_empty() {
+                state.current_pattern_index =
+                    (state.current_pattern_index + 1) % config.lighting_patterns.len();
+
+                let pattern_name = &config.lighting_patterns[state.current_pattern_index].name();
+                println!(
+                    "[Controller] Cycling to pattern {}/{}: {}",
+                    state.current_pattern_index + 1,
+                    config.lighting_patterns.len(),
+                    pattern_name
+                );
+
+                // Send pattern update to executor (preserve pause state)
+                let paused = state.lighting_mode == LightingMode::ManualOverride;
+                if let Err(e) = pattern_tx
+                    .send((state.current_pattern_index, state.brightness_level, paused))
+                    .await
+                {
+                    eprintln!("[Controller] Failed to send pattern update: {}", e);
                 }
             }
         }

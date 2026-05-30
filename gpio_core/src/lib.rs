@@ -63,6 +63,46 @@ impl RgbColor {
             (self.blue as f64 * scale) as u8,
         )
     }
+
+    /// Interpolate between two colors
+    ///
+    /// # Arguments
+    /// * `other` - Target color to interpolate towards
+    /// * `t` - Interpolation factor (0.0 = self, 1.0 = other)
+    pub fn lerp(&self, other: &RgbColor, t: f64) -> Self {
+        let t = t.clamp(0.0, 1.0);
+        Self::new(
+            (self.red as f64 + (other.red as f64 - self.red as f64) * t) as u8,
+            (self.green as f64 + (other.green as f64 - self.green as f64) * t) as u8,
+            (self.blue as f64 + (other.blue as f64 - self.blue as f64) * t) as u8,
+        )
+    }
+
+    /// Create a color from HSV (Hue 0-360, Saturation 0-100, Value 0-100)
+    pub fn from_hsv(hue: f64, saturation: u8, value: u8) -> Self {
+        let s = (saturation.min(100) as f64) / 100.0;
+        let v = (value.min(100) as f64) / 100.0;
+        let h = hue % 360.0;
+
+        let c = v * s;
+        let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+        let m = v - c;
+
+        let (r, g, b) = match h as i32 {
+            0..=59 => (c, x, 0.0),
+            60..=119 => (x, c, 0.0),
+            120..=179 => (0.0, c, x),
+            180..=239 => (0.0, x, c),
+            240..=299 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+
+        Self::new(
+            ((r + m) * 100.0) as u8,
+            ((g + m) * 100.0) as u8,
+            ((b + m) * 100.0) as u8,
+        )
+    }
 }
 
 /// Events emitted by sensors
@@ -74,6 +114,8 @@ pub enum Event {
     LightingModeTogglePressed,
     /// Brightness adjustment button was pressed
     BrightnessButtonPressed,
+    /// Lighting pattern cycle button was pressed
+    PatternCyclePressed,
 }
 
 /// Commands sent to actuators
@@ -98,6 +140,11 @@ pub enum Command {
     SetRgbBrightness(u8),
     /// Blink RGB LED in red to indicate error
     RgbLedBlinkError(u8),
+    /// Set active lighting pattern with optional override flag
+    SetLightingPattern {
+        pattern_index: usize,
+        is_override: bool,
+    },
 
     /// Display text on specified LCD line
     DisplayText { line: u8, text: String },
@@ -127,6 +174,8 @@ pub struct Config {
     pub lcd: LcdConfig,
     /// System behavior configuration
     pub system: SystemConfig,
+    /// Lighting pattern configurations
+    pub lighting_patterns: Vec<LightingPatternConfig>,
 }
 
 /// GPIO hardware pin mappings
@@ -174,6 +223,8 @@ pub struct ButtonPinConfig {
     pub lighting_override_pin: u8,
     /// GPIO pin for brightness adjustment button
     pub lighting_brightness_pin: u8,
+    /// GPIO pin for lighting pattern cycle button
+    pub lighting_pattern_pin: u8,
 }
 
 /// PIR sensor configuration
@@ -199,6 +250,89 @@ pub struct SystemConfig {
     pub default_brightness: u8,
     /// Configurable brightness levels to cycle through
     pub brightness_levels: Vec<u8>,
+    /// Default lighting pattern index
+    pub default_pattern_index: usize,
+}
+
+/// Lighting pattern configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum LightingPatternConfig {
+    /// Static single color
+    Static { color: RgbColor },
+    /// Gradient alternating between two colors
+    Gradient {
+        color1: RgbColor,
+        color2: RgbColor,
+        interval_secs: u64,
+    },
+    /// Rainbow cycle through spectrum
+    Rainbow { cycle_secs: u64, steps: usize },
+    /// Pulse/breathing effect with single color
+    Pulse {
+        color: RgbColor,
+        period_secs: u64,
+        min_brightness: u8,
+        max_brightness: u8,
+    },
+    /// Cycle through list of colors
+    ColorCycle {
+        colors: Vec<RgbColor>,
+        interval_secs: u64,
+    },
+    /// Event-driven (responds to motion/presence)
+    EventDriven,
+}
+
+impl LightingPatternConfig {
+    /// Get a human-readable name for this pattern
+    pub fn name(&self) -> String {
+        match self {
+            LightingPatternConfig::Static { color } => {
+                format!(
+                    "Static (R:{} G:{} B:{})",
+                    color.red, color.green, color.blue
+                )
+            }
+            LightingPatternConfig::Gradient {
+                color1,
+                color2,
+                interval_secs,
+            } => {
+                format!(
+                    "Gradient (R:{},G:{},B:{} ↔ R:{},G:{},B:{} / {}s)",
+                    color1.red,
+                    color1.green,
+                    color1.blue,
+                    color2.red,
+                    color2.green,
+                    color2.blue,
+                    interval_secs
+                )
+            }
+            LightingPatternConfig::Rainbow { cycle_secs, .. } => {
+                format!("Rainbow ({}s cycle)", cycle_secs)
+            }
+            LightingPatternConfig::Pulse {
+                color,
+                period_secs,
+                min_brightness,
+                max_brightness,
+            } => {
+                format!(
+                    "Pulse (R:{},G:{},B:{} / {}s / {}%-{}%)",
+                    color.red, color.green, color.blue, period_secs, min_brightness, max_brightness
+                )
+            }
+            LightingPatternConfig::ColorCycle {
+                colors,
+                interval_secs,
+            } => {
+                format!("ColorCycle ({} colors / {}s)", colors.len(), interval_secs)
+            }
+            LightingPatternConfig::EventDriven => "EventDriven (Motion Responsive)".to_string(),
+        }
+    }
 }
 
 /// Load configuration from YAML file
@@ -227,6 +361,10 @@ pub struct SystemState {
     pub last_motion_time: Option<std::time::Instant>,
     /// Index in brightness_levels array
     pub brightness_index: usize,
+    /// Current active lighting pattern index
+    pub current_pattern_index: usize,
+    /// Whether pattern is temporarily overridden (e.g., by error)
+    pub pattern_override_active: bool,
 }
 
 impl Default for SystemState {
@@ -237,6 +375,8 @@ impl Default for SystemState {
             brightness_level: 100,
             last_motion_time: None,
             brightness_index: 0,
+            current_pattern_index: 0,
+            pattern_override_active: false,
         }
     }
 }
