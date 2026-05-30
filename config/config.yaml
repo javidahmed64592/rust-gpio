@@ -1,6 +1,11 @@
 gpio:
   led:
     pir_led_pin: 26
+  rgb_led:
+    system:
+      red_pin: 23
+      green_pin: 24
+      blue_pin: 25
   button:
     lighting_override_pin: 21
     lighting_brightness_pin: 20

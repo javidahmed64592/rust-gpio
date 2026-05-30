@@ -12,6 +12,10 @@ name = "led-test"
 path = "src/bin/led_test.rs"
 
 [[bin]]
+name = "rgb-led-test"
+path = "src/bin/rgb_led_test.rs"
+
+[[bin]]
 name = "lcd-test"
 path = "src/bin/lcd_test.rs"
 
