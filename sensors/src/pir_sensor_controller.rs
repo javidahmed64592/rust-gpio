@@ -1,10 +1,13 @@
 //! Generic PIR Sensor Controller Module
+//!
+//! Provides a hardware abstraction for PIR (Passive Infrared) motion sensors.
+//! Detects motion via LOW → HIGH transitions on the GPIO pin.
 
 use anyhow::Result;
 use gpio_core::Event;
 use rppal::gpio::{Gpio, InputPin, Level};
 
-/// PIR (Passive Infrared) motion sensor controller
+/// PIR (Passive Infrared) motion sensor controller with state tracking
 pub struct PirSensorController {
     pin: InputPin,
     label: String,
@@ -38,7 +41,10 @@ impl PirSensorController {
     }
 
     /// Check for motion detection (LOW -> HIGH transition)
-    /// Returns Some(Event) if motion is detected, None otherwise
+    ///
+    /// # Returns
+    /// - `Some(Event::MotionDetected)` if motion is detected
+    /// - `None` if no state change or motion ended
     pub fn check_motion(&mut self) -> Option<Event> {
         let current_state = self.pin.read();
 

@@ -1,4 +1,6 @@
 //! Lighting Override Button Task Implementation
+//!
+//! Spawns an async task to poll the lighting mode override button.
 
 use anyhow::Result;
 use gpio_core::{Event, load_config};
@@ -7,6 +9,12 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep};
 
 /// Run the lighting override button task with an event sender channel
+///
+/// # Arguments
+/// * `event_tx` - Channel to send button press events to the controller
+///
+/// # Behavior
+/// Polls button every 50ms with 300ms debounce, emits `LightingModeTogglePressed`
 pub async fn run_lighting_override_button(event_tx: mpsc::Sender<Event>) -> Result<()> {
     // Load config to get button pin
     let config = load_config("config/config.yaml")?;

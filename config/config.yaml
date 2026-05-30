@@ -13,3 +13,4 @@ lcd:
 system:
   presence_timeout_secs: 120
   default_brightness: 100
+  brightness_levels: [25, 50, 75, 100]

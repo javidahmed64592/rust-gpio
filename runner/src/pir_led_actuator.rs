@@ -1,11 +1,17 @@
 //! PIR LED Actuator Task Implementation
 
-use anyhow::Result;
 use actuators::LedController;
+use anyhow::Result;
 use gpio_core::{Command, load_config};
 use tokio::sync::mpsc;
 
 /// Run the PIR LED actuator task with a command receiver channel
+///
+/// # Arguments
+/// * `command_rx` - Channel to receive LED commands from the controller
+///
+/// # Behavior
+/// Processes LED commands (on/off/brightness/blink) until channel closes
 pub async fn run_pir_led_actuator(mut command_rx: mpsc::Receiver<Command>) -> Result<()> {
     // Load config to get PIR LED pin
     let config = load_config("config/config.yaml")?;
@@ -24,7 +30,8 @@ pub async fn run_pir_led_actuator(mut command_rx: mpsc::Receiver<Command>) -> Re
             Command::LedOn => led.turn_on(),
             Command::LedOff => led.turn_off(),
             Command::SetBrightness(level) => led.set_brightness(level),
-            _ => {}
+            Command::LedBlinkError(times) => led.blink_error(times),
+            _ => {} // Ignore non-LED commands
         }
     }
 

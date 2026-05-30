@@ -2,8 +2,10 @@
 
 use anyhow::Result;
 use rppal::gpio::{Gpio, OutputPin};
+use std::thread;
+use std::time::Duration;
 
-/// Generic LED controller for any GPIO pin
+/// Generic LED controller for any GPIO pin with PWM support
 pub struct LedController {
     pin: OutputPin,
     label: String,
@@ -13,6 +15,13 @@ pub struct LedController {
 
 impl LedController {
     /// Initialize LED controller with specified GPIO pin and label
+    ///
+    /// # Arguments
+    /// * `pin_number` - GPIO pin number the LED is connected to
+    /// * `label` - Label for logging (e.g., "PIR LED", "Status LED")
+    ///
+    /// # Returns
+    /// New LED controller instance or error if GPIO initialization fails
     pub fn new(pin_number: u8, label: &str) -> Result<Self> {
         let gpio = Gpio::new()?;
         let mut pin = gpio.get(pin_number)?.into_output();
@@ -38,12 +47,15 @@ impl LedController {
         self.set_brightness(self.previous_brightness);
     }
 
-    /// Turn LED off
+    /// Turn LED off (preserves previous brightness for later restore)
     pub fn turn_off(&mut self) {
         self.set_brightness(0);
     }
 
     /// Set brightness using PWM (0-100)
+    ///
+    /// # Arguments
+    /// * `level` - Brightness percentage (0-100, clamped automatically)
     pub fn set_brightness(&mut self, level: u8) {
         let level = level.min(100); // Clamp to 0-100 range
 
@@ -63,6 +75,31 @@ impl LedController {
         }
 
         println!("[{}] Brightness: {}%", self.label, level);
+    }
+
+    /// Blink LED rapidly to indicate an error condition
+    ///
+    /// # Arguments
+    /// * `times` - Number of times to blink (blocking operation)
+    pub fn blink_error(&mut self, times: u8) {
+        let original_brightness = self.current_brightness;
+
+        for i in 0..times {
+            // Fast blink pattern: 100ms on, 100ms off
+            self.set_brightness(100);
+            thread::sleep(Duration::from_millis(100));
+            self.set_brightness(0);
+
+            // Short pause between blinks except on last one
+            if i < times - 1 {
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+
+        // Restore original brightness after blinking
+        thread::sleep(Duration::from_millis(200));
+        self.set_brightness(original_brightness);
+        println!("[{}] Error blink pattern completed", self.label);
     }
 
     /// Get current brightness level (0-100)

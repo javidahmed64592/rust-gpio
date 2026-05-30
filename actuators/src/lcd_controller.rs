@@ -1,13 +1,14 @@
 //! Generic LCD Controller Module
 //!
-//! Controller for I2C LCD displays (16x2 with PCF8574 backpack)
+//! Controller for I2C LCD displays (16x2 with PCF8574 I2C backpack).
+//! Uses HD44780 protocol in 4-bit mode with optimized timing.
 
 use anyhow::Result;
 use rppal::i2c::I2c;
 use std::thread::sleep;
 use std::time::Duration;
 
-/// Generic LCD controller for I2C displays
+/// Generic LCD controller for 16x2 I2C displays
 pub struct LcdController {
     i2c: I2c,
     label: String,

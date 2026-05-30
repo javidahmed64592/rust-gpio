@@ -1,4 +1,6 @@
 //! LCD Display Task Implementation
+//!
+//! Spawns an async task to process LCD display commands.
 
 use actuators::LcdController;
 use anyhow::Result;
@@ -6,6 +8,12 @@ use gpio_core::{Command, load_config};
 use tokio::sync::mpsc;
 
 /// Run the LCD display task with command receiver
+///
+/// # Arguments
+/// * `command_rx` - Channel to receive display commands from the controller
+///
+/// # Behavior
+/// Processes LCD commands (text display, clear, backlight control) until channel closes
 pub async fn run_lcd_display(mut command_rx: mpsc::Receiver<Command>) -> Result<()> {
     // Load config to get LCD address
     let config = load_config("config/config.yaml")?;

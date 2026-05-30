@@ -9,6 +9,14 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, interval};
 
 /// Run the controller with event receiver and command sender channels
+///
+/// # Arguments
+/// * `event_rx` - Channel to receive events from sensors
+/// * `led_tx` - Channel to send commands to LED actuator
+/// * `lcd_tx` - Channel to send commands to LCD display
+///
+/// # Behavior
+/// Central brain that processes events, maintains state, and generates commands
 pub async fn run_controller(
     mut event_rx: mpsc::Receiver<Event>,
     led_tx: mpsc::Sender<Command>,
@@ -17,13 +25,28 @@ pub async fn run_controller(
     // Load config
     let config = load_config("config/config.yaml")?;
 
-    // Initialize system state
+    // Initialize system state with config values
     let mut state = SystemState::default();
     state.brightness_level = config.system.default_brightness;
+
+    // Set initial brightness index to match default brightness
+    if let Some(idx) = config
+        .system
+        .brightness_levels
+        .iter()
+        .position(|&b| b == config.system.default_brightness)
+    {
+        state.brightness_index = idx;
+    }
+
     println!("[Controller] Ready!");
     println!(
         "[Controller] Presence timeout: {} seconds",
         config.system.presence_timeout_secs
+    );
+    println!(
+        "[Controller] Brightness levels: {:?}",
+        config.system.brightness_levels
     );
 
     // Create a timer to check for presence timeout every 5 seconds
@@ -35,16 +58,16 @@ pub async fn run_controller(
             Some(event) = event_rx.recv() => {
                 println!("[Controller] Event received: {:?}", event);
 
-                // Send event info to LCD (top row - line 0)
+                // Send event info to LCD (top row - line 0) - use static strings where possible
                 let event_text = match &event {
-                    Event::MotionDetected => "Motion Detected".to_string(),
-                    Event::LightingModeTogglePressed => "Mode Toggle".to_string(),
-                    Event::BrightnessButtonPressed => "Brightness Adj".to_string(),
+                    Event::MotionDetected => "Motion Detected",
+                    Event::LightingModeTogglePressed => "Mode Toggle",
+                    Event::BrightnessButtonPressed => "Brightness Adj",
                 };
 
                 if let Err(e) = lcd_tx.send(Command::DisplayText {
                     line: 0,
-                    text: event_text,
+                    text: event_text.to_string(),
                 }).await {
                     eprintln!("[Controller] Error sending event to LCD: {}", e);
                 }
@@ -57,22 +80,28 @@ pub async fn run_controller(
                     println!("[Controller] Sending command: {:?}", command);
 
                     // Send LED commands to LED actuator
-                    if matches!(command, Command::LedOn | Command::LedOff | Command::SetBrightness(_)) {
+                    if matches!(command, Command::LedOn | Command::LedOff | Command::SetBrightness(_) | Command::LedBlinkError(_)) {
                         if let Err(e) = led_tx.send(command.clone()).await {
                             eprintln!("[Controller] Error sending to LED: {}", e);
                         }
 
                         // Also send command description to LCD (bottom row - line 1)
                         let cmd_text = match &command {
-                            Command::LedOn => "LED: ON".to_string(),
-                            Command::LedOff => "LED: OFF".to_string(),
-                            Command::SetBrightness(level) => format!("Brightness: {}%", level),
-                            _ => String::new(),
+                            Command::LedOn => "LED: ON",
+                            Command::LedOff => "LED: OFF",
+                            Command::SetBrightness(level) => {
+                                // Need to format, so allocate here
+                                &format!("Brightness: {}%", level)
+                            },
+                            Command::LedBlinkError(times) => {
+                                &format!("Error! Blink x{}", times)
+                            },
+                            _ => "",
                         };
                         if !cmd_text.is_empty() {
                             if let Err(e) = lcd_tx.send(Command::DisplayText {
                                 line: 1,
-                                text: cmd_text,
+                                text: cmd_text.to_string(),
                             }).await {
                                 eprintln!("[Controller] Error sending command to LCD: {}", e);
                             }
@@ -136,11 +165,12 @@ pub async fn run_controller(
 
 /// Process a sensor event and update system state
 /// Returns commands to be sent to actuators
-fn handle_event(
-    event: Event,
-    state: &mut SystemState,
-    _config: &gpio_core::Config,
-) -> Vec<Command> {
+///
+/// # Arguments
+/// * `event` - The sensor event to process
+/// * `state` - Mutable reference to system state
+/// * `config` - System configuration with brightness levels
+fn handle_event(event: Event, state: &mut SystemState, config: &gpio_core::Config) -> Vec<Command> {
     let mut commands = Vec::new();
 
     match event {
@@ -188,21 +218,25 @@ fn handle_event(
         }
 
         Event::BrightnessButtonPressed => {
-            // Cycle through brightness levels: 25%, 50%, 75%, 100%
-            state.brightness_level = match state.brightness_level {
-                0..=25 => 50,
-                26..=50 => 75,
-                51..=75 => 100,
-                _ => 25,
-            };
-            println!(
-                "[Controller] Brightness adjusted to: {}%",
-                state.brightness_level
-            );
+            // Cycle through configurable brightness levels
+            let brightness_levels = &config.system.brightness_levels;
 
-            // Update LED brightness if it's currently on
-            if state.presence_detected {
-                commands.push(Command::SetBrightness(state.brightness_level));
+            if !brightness_levels.is_empty() {
+                // Move to next brightness level
+                state.brightness_index = (state.brightness_index + 1) % brightness_levels.len();
+                state.brightness_level = brightness_levels[state.brightness_index];
+
+                println!(
+                    "[Controller] Brightness adjusted to: {}% (level {}/{})",
+                    state.brightness_level,
+                    state.brightness_index + 1,
+                    brightness_levels.len()
+                );
+
+                // Update LED brightness if it's currently on
+                if state.presence_detected {
+                    commands.push(Command::SetBrightness(state.brightness_level));
+                }
             }
         }
     }

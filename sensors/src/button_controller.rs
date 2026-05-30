@@ -1,9 +1,12 @@
 //! Generic Button Controller Module
+//!
+//! Provides a hardware abstraction for GPIO buttons with pull-up resistors.
+//! Detects button presses via falling edge (HIGH → LOW) detection.
 
 use anyhow::Result;
 use rppal::gpio::{Gpio, InputPin, Level};
 
-/// Generic button controller for any GPIO pin
+/// Generic button controller for any GPIO pin with edge detection
 pub struct ButtonController {
     pin: InputPin,
     label: String,
@@ -31,7 +34,9 @@ impl ButtonController {
     }
 
     /// Check if button was pressed (falling edge: HIGH -> LOW)
-    /// Returns true if a press was detected
+    ///
+    /// # Returns
+    /// `true` if a press was detected since last check, `false` otherwise
     pub fn is_pressed(&mut self) -> bool {
         let current_state = self.pin.read();
         let pressed = self.last_state == Level::High && current_state == Level::Low;
