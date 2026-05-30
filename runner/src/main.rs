@@ -24,26 +24,26 @@ async fn main() -> Result<()> {
     // Event channel: sensors -> controller
     let (event_tx, event_rx) = mpsc::channel::<Event>(32);
 
-    // Command channel: controller -> LED actuator
-    let (led_cmd_tx, led_cmd_rx) = mpsc::channel(32);
+    // Command channel: controller -> PIR LED actuator
+    let (pir_led_cmd_tx, pir_led_cmd_rx) = mpsc::channel(32);
 
     println!("Spawning components...");
 
-    // Spawn LED actuator task
-    let led_handle = tokio::spawn(async move {
-        if let Err(e) = actuators::run_led_actuator(led_cmd_rx).await {
-            eprintln!("LED actuator error: {}", e);
-        }
-    });
-    println!("  ✓ LED actuator spawned");
-
     // Spawn controller task
     let controller_handle = tokio::spawn(async move {
-        if let Err(e) = controller::run_controller(event_rx, led_cmd_tx).await {
+        if let Err(e) = controller::run_controller(event_rx, pir_led_cmd_tx).await {
             eprintln!("Controller error: {}", e);
         }
     });
     println!("  ✓ Controller spawned");
+
+    // Spawn PIR LED actuator task
+    let pir_led_handle = tokio::spawn(async move {
+        if let Err(e) = actuators::run_pir_led_actuator(pir_led_cmd_rx).await {
+            eprintln!("PIR LED actuator error: {}", e);
+        }
+    });
+    println!("  ✓ PIR LED actuator spawned");
 
     // Clone event_tx for each sensor
     let pir_event_tx = event_tx.clone();
@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
 
     // Wait for tasks to finish gracefully
     let _ = tokio::join!(
-        led_handle,
+        pir_led_handle,
         controller_handle,
         pir_handle,
         override_handle,

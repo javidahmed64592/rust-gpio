@@ -8,8 +8,8 @@ license.workspace = true
 path = "src/lib.rs"
 
 [[bin]]
-name = "led-actuator"
-path = "src/led.rs"
+name = "led-test"
+path = "src/bin/led_test.rs"
 
 [[bin]]
 name = "lcd-actuator"

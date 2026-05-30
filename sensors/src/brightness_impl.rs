@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpio_core::{Event, load_config};
 use tokio::sync::mpsc;
 
-use crate::button_impl::run_button;
+use crate::button_controller::run_button;
 
 /// Run the brightness button with an event sender channel
 pub async fn run_brightness_button(event_tx: mpsc::Sender<Event>) -> Result<()> {
