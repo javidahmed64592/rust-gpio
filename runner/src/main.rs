@@ -14,8 +14,8 @@
 mod brightness_button;
 mod lcd_display;
 mod lighting_override_button;
-mod pir_led_actuator;
 mod pir_sensor;
+mod rgb_led_actuator;
 
 use anyhow::Result;
 use gpio_core::Event;
@@ -24,8 +24,8 @@ use tokio::sync::{broadcast, mpsc};
 use brightness_button::run_brightness_button;
 use lcd_display::run_lcd_display;
 use lighting_override_button::run_lighting_override_button;
-use pir_led_actuator::run_pir_led_actuator;
 use pir_sensor::run_pir_sensor;
+use rgb_led_actuator::run_rgb_led_actuator;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,8 +36,8 @@ async fn main() -> Result<()> {
     // Event channel: sensors -> controller
     let (event_tx, event_rx) = mpsc::channel::<Event>(32);
 
-    // Command channel: controller -> PIR LED actuator
-    let (pir_led_cmd_tx, pir_led_cmd_rx) = mpsc::channel(32);
+    // Command channel: controller -> RGB LED actuator
+    let (rgb_led_cmd_tx, rgb_led_cmd_rx) = mpsc::channel(32);
 
     // Command channel: controller -> LCD actuator
     let (lcd_cmd_tx, lcd_cmd_rx) = mpsc::channel(32);
@@ -113,14 +113,14 @@ async fn main() -> Result<()> {
     // === CONTROLLER ===
 
     // Clone command senders so we can use them for shutdown
-    let shutdown_led_tx = pir_led_cmd_tx.clone();
+    let shutdown_led_tx = rgb_led_cmd_tx.clone();
     let shutdown_lcd_tx = lcd_cmd_tx.clone();
 
     // Spawn controller task
     let controller_handle = tokio::spawn(async move {
         let mut shutdown = controller_shutdown;
         tokio::select! {
-            result = controller::run_controller(event_rx, pir_led_cmd_tx, lcd_cmd_tx) => {
+            result = controller::run_controller(event_rx, rgb_led_cmd_tx, lcd_cmd_tx) => {
                 if let Err(e) = result {
                     eprintln!("Controller error: {}", e);
                 }
@@ -134,21 +134,21 @@ async fn main() -> Result<()> {
 
     // === ACTUATORS ===
 
-    // Spawn PIR LED actuator task
-    let pir_led_handle = tokio::spawn(async move {
+    // Spawn RGB LED actuator task
+    let rgb_led_handle = tokio::spawn(async move {
         let mut shutdown = led_shutdown;
         tokio::select! {
-            result = run_pir_led_actuator(pir_led_cmd_rx) => {
+            result = run_rgb_led_actuator(rgb_led_cmd_rx) => {
                 if let Err(e) = result {
-                    eprintln!("PIR LED actuator error: {}", e);
+                    eprintln!("RGB LED actuator error: {}", e);
                 }
             }
             _ = shutdown.recv() => {
-                println!("[PIR LED] Shutdown signal received");
+                println!("[RGB LED] Shutdown signal received");
             }
         }
     });
-    println!("  ✓ PIR LED actuator spawned");
+    println!("  ✓ RGB LED actuator spawned");
 
     // Spawn LCD display task
     let lcd_handle = tokio::spawn(async move {
@@ -181,9 +181,9 @@ async fn main() -> Result<()> {
     println!("\n\nShutdown signal received...");
     println!("Stopping all tasks...");
 
-    // Turn off LED and LCD before shutting down
-    println!("Turning off LED and LCD...");
-    let _ = shutdown_led_tx.send(gpio_core::Command::LedOff).await;
+    // Turn off RGB LED and LCD before shutting down
+    println!("Turning off RGB LED and LCD...");
+    let _ = shutdown_led_tx.send(gpio_core::Command::RgbLedOff).await;
     let _ = shutdown_lcd_tx.send(gpio_core::Command::DisplayOff).await;
     let _ = shutdown_lcd_tx.send(gpio_core::Command::ClearDisplay).await;
 
@@ -202,7 +202,7 @@ async fn main() -> Result<()> {
         override_handle,
         brightness_handle,
         controller_handle,
-        pir_led_handle,
+        rgb_led_handle,
         lcd_handle
     );
 

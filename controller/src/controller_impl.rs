@@ -3,7 +3,7 @@
 //! Central decision-making logic for the GPIO system.
 
 use anyhow::Result;
-use gpio_core::{Command, Event, LightingMode, SystemState, load_config};
+use gpio_core::{Command, Event, LightingMode, RgbColor, SystemState, load_config};
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, interval};
@@ -79,21 +79,35 @@ pub async fn run_controller(
                 for command in commands {
                     println!("[Controller] Sending command: {:?}", command);
 
-                    // Send LED commands to LED actuator
-                    if matches!(command, Command::LedOn | Command::LedOff | Command::SetBrightness(_) | Command::LedBlinkError(_)) {
+                    // Send LED commands to LED actuator (now RGB LED)
+                    if matches!(command, Command::RgbLedOn | Command::RgbLedOff | Command::SetRgbBrightness(_) | Command::SetRgbColor(_) | Command::RgbLedBlinkError(_)) {
                         if let Err(e) = led_tx.send(command.clone()).await {
-                            eprintln!("[Controller] Error sending to LED: {}", e);
+                            eprintln!("[Controller] Error sending to RGB LED: {}", e);
                         }
 
                         // Also send command description to LCD (bottom row - line 1)
                         let cmd_text = match &command {
-                            Command::LedOn => "LED: ON",
-                            Command::LedOff => "LED: OFF",
-                            Command::SetBrightness(level) => {
+                            Command::RgbLedOn => "LED: ON",
+                            Command::RgbLedOff => "LED: OFF",
+                            Command::SetRgbBrightness(level) => {
                                 // Need to format, so allocate here
                                 &format!("Brightness: {}%", level)
                             },
-                            Command::LedBlinkError(times) => {
+                            Command::SetRgbColor(color) => {
+                                // Format color description
+                                if color == &RgbColor::green() {
+                                    "Color: Green"
+                                } else if color == &RgbColor::blue() {
+                                    "Color: Blue"
+                                } else if color == &RgbColor::red() {
+                                    "Color: Red"
+                                } else if color == &RgbColor::orange() {
+                                    "Color: Orange"
+                                } else {
+                                    "Color: Custom"
+                                }
+                            },
+                            Command::RgbLedBlinkError(times) => {
                                 &format!("Error! Blink x{}", times)
                             },
                             _ => "",
@@ -133,8 +147,8 @@ pub async fn run_controller(
                             // In Automatic mode, turn LED and LCD off when presence expires
                             if state.lighting_mode == LightingMode::Automatic {
                                 println!("[Controller] Automatic mode: turning LED and LCD OFF");
-                                if let Err(e) = led_tx.send(Command::LedOff).await {
-                                    eprintln!("[Controller] Error sending LedOff command: {}", e);
+                                if let Err(e) = led_tx.send(Command::RgbLedOff).await {
+                                    eprintln!("[Controller] Error sending RgbLedOff command: {}", e);
                                 }
                                 // Send command description to LCD
                                 if let Err(e) = lcd_tx.send(Command::DisplayText {
@@ -186,10 +200,14 @@ fn handle_event(event: Event, state: &mut SystemState, config: &gpio_core::Confi
             if state.lighting_mode == LightingMode::Automatic {
                 if !was_present {
                     println!("[Controller] Automatic mode: turning LED and LCD ON");
-                    commands.push(Command::LedOn);
+                    // Set RGB LED to green (normal operation) and turn on
+                    commands.push(Command::SetRgbColor(RgbColor::green()));
+                    commands.push(Command::RgbLedOn);
                     commands.push(Command::DisplayOn);
                 } else {
-                    println!("[Controller] Presence extended (LED already on)");
+                    println!("[Controller] Presence extended - flash blue to indicate motion");
+                    // Flash blue momentarily to indicate motion was detected
+                    commands.push(Command::SetRgbColor(RgbColor::blue()));
                 }
             }
         }
@@ -199,16 +217,17 @@ fn handle_event(event: Event, state: &mut SystemState, config: &gpio_core::Confi
             state.lighting_mode = match state.lighting_mode {
                 LightingMode::Automatic => {
                     println!("[Controller] Switching to Manual Override - turning LED and LCD OFF");
-                    commands.push(Command::LedOff);
+                    commands.push(Command::RgbLedOff);
                     commands.push(Command::DisplayOff);
                     LightingMode::ManualOverride
                 }
                 LightingMode::ManualOverride => {
                     println!("[Controller] Switching to Automatic mode");
-                    // If presence is detected, turn LED and LCD back on
+                    // If presence is detected, turn LED and LCD back on with green color
                     if state.presence_detected {
                         println!("[Controller] Presence detected - turning LED and LCD ON");
-                        commands.push(Command::LedOn);
+                        commands.push(Command::SetRgbColor(RgbColor::green()));
+                        commands.push(Command::RgbLedOn);
                         commands.push(Command::DisplayOn);
                     }
                     LightingMode::Automatic
@@ -233,9 +252,9 @@ fn handle_event(event: Event, state: &mut SystemState, config: &gpio_core::Confi
                     brightness_levels.len()
                 );
 
-                // Update LED brightness if it's currently on
+                // Update RGB LED brightness if it's currently on
                 if state.presence_detected {
-                    commands.push(Command::SetBrightness(state.brightness_level));
+                    commands.push(Command::SetRgbBrightness(state.brightness_level));
                 }
             }
         }
