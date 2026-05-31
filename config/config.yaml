@@ -30,7 +30,7 @@ lcd:
   i2c_address: 0x27
 
 system:
-  presence_timeout_secs: 120
+  presence_timeout_secs: 300
   default_brightness: 100
   brightness_levels: [25, 50, 75, 100]
   default_pattern_index: 0
@@ -43,12 +43,12 @@ lighting_patterns:
 
   # Static: Single solid color
   - type: Static
-    color: { red: 100, green: 50, blue: 0 }  # Warm orange
+    color: { red: 100, green: 3, blue: 0 }  # Warm orange
 
   # Gradient: Smooth alternation between two colors
   - type: Gradient
     color1: { red: 100, green: 0, blue: 0 }    # Red
-    color2: { red: 100, green: 80, blue: 0 }   # Orange
+    color2: { red: 100, green: 5, blue: 0 }   # Orange
     interval_secs: 5
 
   # Rainbow: Full spectrum cycle
@@ -58,7 +58,7 @@ lighting_patterns:
 
   # Pulse: Breathing effect with a single color
   - type: Pulse
-    color: { red: 0, green: 100, blue: 100 }   # Cyan
+    color: { red: 0, green: 90, blue: 100 }   # Cyan
     period_secs: 4
     min_brightness: 20
     max_brightness: 100
