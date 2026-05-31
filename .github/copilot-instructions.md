@@ -26,40 +26,47 @@ This project follows a **strict robotics-inspired event-driven architecture**. A
 ## Workspace Structure
 
 ```
-gpio_core/    - Shared types (Event, Command, SystemState, Config)
-sensors/      - Hardware controllers that emit events only
-actuators/    - Hardware controllers that consume commands only
-controller/   - Business logic and decision making
-runner/       - System orchestration and task spawning
-config/       - YAML configuration files
+gpio_core/         - Shared types (Event, Command, SystemState, Config)
+sensors/           - Hardware controllers that emit events only
+actuators/         - Hardware controllers that consume commands only
+controller/        - Business logic and decision making
+runner/            - System orchestration and task spawning
+config/            - YAML configuration files
+rust_gpio_utils/   - Python utility scripts (DHT11 sensor driver)
 ```
 
 ### Crate Responsibilities
 
 **gpio_core** - Protocol layer:
-- `Event` enum: All sensor events (MotionDetected, BrightnessButtonPressed, etc.)
-- `Command` enum: All actuator commands (LedOn, SetBrightness, DisplayText, etc.)
-- `SystemState`: Controller's internal state (presence, lighting mode, brightness, etc.)
+- `Event` enum: All sensor events (MotionDetected, BrightnessButtonPressed, PatternCyclePressed, EnvironmentReading, etc.)
+- `Command` enum: All actuator commands (RgbLedOn, SetRgbColor, DisplayText, SetTemperatureLeds, SetHumidityLeds, etc.)
+- `RgbColor`: RGB color representation with HSV/lerp utilities
+- `LightingPatternConfig`: Pattern configurations (EventDriven, Static, Gradient, Rainbow, Pulse, ColorCycle)
+- `SystemState`: Controller's internal state (presence, lighting mode, brightness, pattern index, indicator LED state)
 - `SystemConfig`: Configuration loaded from YAML
 - `load_config()`: Config loading utility
 
 **sensors** - Hardware input:
-- Generic controllers: `ButtonController`, `PirSensorController`
+- Generic controllers: `ButtonController`, `PirSensorController`, `Dht11Controller`
 - Methods return `Option<Event>` - **never** send commands
-- Example: `check_motion() -> Option<Event>`
+- Example: `check_motion() -> Option<Event>`, `read_environment() -> Option<Event>`
+- DHT11 sensor uses async subprocess to Python utility for reliable readings
 
 **actuators** - Hardware output:
-- Generic controllers: `LedController`, `LcdController`
+- Generic controllers: `RgbLedController`, `LcdController`, `IndicatorLedController`
 - Methods consume commands - **never** emit events
-- Example: `set_brightness(level: u8)`
+- Example: `set_color(color: RgbColor)`, `set_indicators(low, medium, high, brightness)`
+- RGB LED uses hardware PWM (100Hz) for smooth color mixing
+- Indicator LEDs use PWM for brightness control (0-100%)
 
 **controller** - Business logic:
-- `run_controller(event_rx, led_tx, lcd_tx)` - Main decision loop
+- `run_controller(event_rx, led_tx, lcd_tx, pattern_tx, temp_led_tx, humidity_led_tx)` - Main decision loop
 - Owns `SystemState` and applies all business rules
 - Only place where behavior exists
+- Routes commands to appropriate actuator channels
 
 **runner** - Task orchestration:
-- Individual task modules: `pir_sensor.rs`, `brightness_button.rs`, `pir_led_actuator.rs`, `lcd_display.rs`
+- Individual task modules: `pir_sensor.rs`, `brightness_button.rs`, `pattern_button.rs`, `lighting_override_button.rs`, `dht11_sensor.rs`, `rgb_led_actuator.rs`, `lcd_display.rs`, `pattern_executor.rs`, `temperature_led_actuator.rs`, `humidity_led_actuator.rs`
 - `main.rs`: Bootstrap channels, spawn tasks, handle shutdown
 - Minimal business logic
 
@@ -79,9 +86,14 @@ All hardware and behavior config lives in `config/config.yaml`.
 
 **GPIO Libraries:**
 - Use `rppal` 0.22.1 for GPIO (digital I/O, PWM, I2C)
-- PWM frequency: 100Hz for LED brightness
+- PWM frequency: 100Hz for RGB LED and indicator LED brightness
 - Debounce timing: 300ms for buttons
-- Polling intervals: 100ms (PIR), 50ms (buttons)
+- Polling intervals: 100ms (PIR), 50ms (buttons), 2000ms (DHT11)
+
+**Python Integration:**
+- DHT11 sensor uses Python script (`rust_gpio_utils/dht11.py`) via `tokio::process::Command`
+- Package manager: `uv` for Python dependencies (gpiozero, lgpio)
+- Async subprocess execution prevents blocking event loop
 
 **LCD Timing:**
 - Enable pulse: 500μs
@@ -283,15 +295,22 @@ impl LedController {
 - PIR motion detection with 120s timeout
 - Lighting mode toggle (Automatic / Manual Override)
 - Configurable brightness cycling (from YAML array)
-- LCD real-time status display
-- LED error indication (fast blink pattern)
-- Graceful shutdown handling
+- **RGB LED with PWM color control** (3 GPIO pins, 100Hz PWM)
+- **6 lighting patterns** (EventDriven, Static, Gradient, Rainbow, Pulse, ColorCycle)
+- **Pattern cycle button** to switch between lighting effects
+- **DHT11 temperature/humidity sensor** (Python subprocess integration)
+- **Temperature indicator LEDs** (low/medium/high with PWM brightness)
+- **Humidity indicator LEDs** (low/medium/high with PWM brightness)
+- **LCD display** shows pattern name (line 0) and temp/humidity (line 1)
+- Pattern executor task with dynamic pattern switching
+- Graceful shutdown handling for all tasks
 - Comprehensive rustdoc documentation
 - String allocation optimizations
 
 **High Priority Next:**
-- System metrics on LCD (CPU, memory, temperature)
-- LED status patterns (slow pulse, breathing effects)
+- Smooth color transitions in pattern executor
+- Persistent state across restarts (brightness, pattern, mode)
+- Configuration hot-reload without restart
 
 See README.md for full feature roadmap.
 

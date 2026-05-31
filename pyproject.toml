@@ -1,0 +1,164 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rust-gpio"
+version = "0.1.0"
+description = "Raspberry Pi GPIO control system with DHT11 environmental sensor support"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Javid Ahmed", email = "javidahmed@icloud.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+]
+dependencies = [
+    "gpiozero>=2.0.0",
+    "lgpio>=0.2.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.8.0",
+    "mypy>=1.8.0",
+]
+
+[project.scripts]
+rust-gpio-dht11 = "rust_gpio_utils.dht11:main"
+
+[tool.hatch.build]
+include = [
+    "rust_gpio_utils/**",
+]
+
+[tool.pytest.ini_options]
+addopts = [
+    "-vv",
+    "--cov",
+    "--cov-report",
+    "term-missing",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["rust_gpio_utils", "tests"]
+
+[tool.coverage.report]
+fail_under = 80
+skip_covered = false
+show_missing = true
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+indent-width = 4
+
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+    "target",
+]
+
+extend-exclude = [
+    "**/__init__.py",
+]
+
+[tool.ruff.lint]
+select = [
+    "A",
+    "ANN",
+    "ASYNC",
+    "B",
+    "C4",
+    "D",
+    "E",
+    "EM",
+    "F",
+    "FBT",
+    "G",
+    "I",
+    "ISC",
+    "LOG",
+    "N",
+    "NPY",
+    "PD",
+    "PERF",
+    "PL",
+    "PT",
+    "RET",
+    "RUF",
+    "S",
+    "TRY",
+    "UP",
+    "W",
+    "YTT",
+]
+ignore = [
+    "D203",
+    "D213",
+    "PLR0913",
+    "S101"
+]
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+warn_unused_configs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unreachable = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = [
+    "gpiozero.*",
+    "lgpio.*",
+]
+ignore_missing_imports = true
