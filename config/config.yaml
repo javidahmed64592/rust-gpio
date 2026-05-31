@@ -22,7 +22,7 @@ gpio:
     lighting_brightness_pin: 20
     lighting_pattern_pin: 16
   pir:
-    pin: 12
+    pin: 18
   dht11:
     pin: 26
 
