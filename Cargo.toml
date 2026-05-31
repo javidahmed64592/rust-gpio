@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "gpio_core",
+    "sensors",
+    "actuators",
+    "controller",
+    "runner",
+]
+
+[workspace.dependencies]
+tokio = { version = "1.41", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+anyhow = "1.0"
+thiserror = "2.0"
+rppal = "0.22.1"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"

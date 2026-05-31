@@ -1,0 +1,26 @@
+[package]
+name = "actuators"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "led-test"
+path = "src/bin/led_test.rs"
+
+[[bin]]
+name = "rgb-led-test"
+path = "src/bin/rgb_led_test.rs"
+
+[[bin]]
+name = "lcd-test"
+path = "src/bin/lcd_test.rs"
+
+[dependencies]
+gpio_core = { path = "../gpio_core" }
+tokio.workspace = true
+anyhow.workspace = true
+rppal.workspace = true

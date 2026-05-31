@@ -19,3 +19,51 @@ target
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Python virtual environment and dependencies
+.venv/
+uv.lock
+.python-version
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Python testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Python type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# Python IDEs
+.python-version
+*.swp
+*~
+.vscode/
