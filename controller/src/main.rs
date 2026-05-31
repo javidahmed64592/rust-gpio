@@ -13,10 +13,20 @@ async fn main() -> Result<()> {
     let (led_tx, mut led_rx) = mpsc::channel(32);
     let (lcd_tx, mut lcd_rx) = mpsc::channel(32);
     let (pattern_tx, mut pattern_rx) = mpsc::channel::<(usize, u8, bool)>(32); // (pattern_index, brightness, paused)
+    let (temp_led_tx, _temp_led_rx) = mpsc::channel(32);
+    let (humidity_led_tx, _humidity_led_rx) = mpsc::channel(32);
 
     // Spawn the controller
     let controller_handle = tokio::spawn(async move {
-        controller::run_controller(event_rx, led_tx, lcd_tx, pattern_tx).await
+        controller::run_controller(
+            event_rx,
+            led_tx,
+            lcd_tx,
+            pattern_tx,
+            temp_led_tx,
+            humidity_led_tx,
+        )
+        .await
     });
 
     // Send some test events

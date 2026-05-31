@@ -116,6 +116,11 @@ pub enum Event {
     BrightnessButtonPressed,
     /// Lighting pattern cycle button was pressed
     PatternCyclePressed,
+    /// Temperature and humidity reading from DHT11 sensor
+    EnvironmentReading {
+        temperature_celsius: f32,
+        humidity_percent: f32,
+    },
 }
 
 /// Commands sent to actuators
@@ -154,6 +159,23 @@ pub enum Command {
     DisplayOn,
     /// Turn LCD backlight off
     DisplayOff,
+
+    /// Set temperature indicator LEDs (low, medium, high) with brightness (0-100)
+    SetTemperatureLeds {
+        low: bool,
+        medium: bool,
+        high: bool,
+        brightness: u8,
+    },
+    /// Set humidity indicator LEDs (low, medium, high) with brightness (0-100)
+    SetHumidityLeds {
+        low: bool,
+        medium: bool,
+        high: bool,
+        brightness: u8,
+    },
+    /// Turn all indicator LEDs off (both temperature and humidity)
+    IndicatorLedsOff,
 }
 
 /// Lighting control mode
@@ -189,13 +211,17 @@ pub struct GpioConfig {
     pub button: ButtonPinConfig,
     /// PIR sensor configuration
     pub pir: PirConfig,
+    /// DHT11 temperature/humidity sensor configuration
+    pub dht11: Dht11Config,
 }
 
 /// LED GPIO pin configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LedPinConfig {
-    /// GPIO pin number for PIR-controlled LED
-    pub pir_led_pin: u8,
+    /// Temperature indicator LED configuration
+    pub temperature: TemperatureLedConfig,
+    /// Humidity indicator LED configuration
+    pub humidity: HumidityLedConfig,
 }
 
 /// RGB LED GPIO pin configuration
@@ -232,6 +258,43 @@ pub struct ButtonPinConfig {
 pub struct PirConfig {
     /// GPIO pin number for PIR sensor
     pub pin: u8,
+}
+
+/// DHT11 sensor configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Dht11Config {
+    /// GPIO pin number for DHT11 data line
+    pub pin: u8,
+}
+
+/// Temperature indicator LED configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemperatureLedConfig {
+    /// GPIO pin for low temperature indicator
+    pub low_pin: u8,
+    /// GPIO pin for medium temperature indicator
+    pub medium_pin: u8,
+    /// GPIO pin for high temperature indicator
+    pub high_pin: u8,
+    /// Temperature threshold for medium level (°C)
+    pub medium_threshold: f32,
+    /// Temperature threshold for high level (°C)
+    pub high_threshold: f32,
+}
+
+/// Humidity indicator LED configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HumidityLedConfig {
+    /// GPIO pin for low humidity indicator
+    pub low_pin: u8,
+    /// GPIO pin for medium humidity indicator
+    pub medium_pin: u8,
+    /// GPIO pin for high humidity indicator
+    pub high_pin: u8,
+    /// Humidity threshold for medium level (%)
+    pub medium_threshold: f32,
+    /// Humidity threshold for high level (%)
+    pub high_threshold: f32,
 }
 
 /// LCD display configuration
@@ -288,49 +351,34 @@ impl LightingPatternConfig {
     /// Get a human-readable name for this pattern
     pub fn name(&self) -> String {
         match self {
-            LightingPatternConfig::Static { color } => {
-                format!(
-                    "Static (R:{} G:{} B:{})",
-                    color.red, color.green, color.blue
-                )
+            LightingPatternConfig::Static { color: _ } => {
+                format!("Static")
             }
             LightingPatternConfig::Gradient {
-                color1,
-                color2,
+                color1: _,
+                color2: _,
                 interval_secs,
             } => {
-                format!(
-                    "Gradient (R:{},G:{},B:{} ↔ R:{},G:{},B:{} / {}s)",
-                    color1.red,
-                    color1.green,
-                    color1.blue,
-                    color2.red,
-                    color2.green,
-                    color2.blue,
-                    interval_secs
-                )
+                format!("Gradient ({}s)", interval_secs)
             }
             LightingPatternConfig::Rainbow { cycle_secs, .. } => {
-                format!("Rainbow ({}s cycle)", cycle_secs)
+                format!("Rainbow ({}s)", cycle_secs)
             }
             LightingPatternConfig::Pulse {
-                color,
+                color: _,
                 period_secs,
-                min_brightness,
-                max_brightness,
+                min_brightness: _,
+                max_brightness: _,
             } => {
-                format!(
-                    "Pulse (R:{},G:{},B:{} / {}s / {}%-{}%)",
-                    color.red, color.green, color.blue, period_secs, min_brightness, max_brightness
-                )
+                format!("Pulse ({}s)", period_secs)
             }
             LightingPatternConfig::ColorCycle {
-                colors,
+                colors: _,
                 interval_secs,
             } => {
-                format!("ColorCycle ({} colors / {}s)", colors.len(), interval_secs)
+                format!("ColorCycle ({}s)", interval_secs)
             }
-            LightingPatternConfig::EventDriven => "EventDriven (Motion Responsive)".to_string(),
+            LightingPatternConfig::EventDriven => "EventDriven".to_string(),
         }
     }
 }
@@ -365,6 +413,8 @@ pub struct SystemState {
     pub current_pattern_index: usize,
     /// Whether pattern is temporarily overridden (e.g., by error)
     pub pattern_override_active: bool,
+    /// Whether indicator LEDs are enabled (follows lighting mode)
+    pub indicator_leds_enabled: bool,
 }
 
 impl Default for SystemState {
@@ -377,6 +427,7 @@ impl Default for SystemState {
             brightness_index: 0,
             current_pattern_index: 0,
             pattern_override_active: false,
+            indicator_leds_enabled: true,
         }
     }
 }

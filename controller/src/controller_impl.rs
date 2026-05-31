@@ -14,9 +14,11 @@ use tokio::time::{Duration, interval};
 ///
 /// # Arguments
 /// * `event_rx` - Channel to receive events from sensors
-/// * `led_tx` - Channel to send commands to LED actuator
+/// * `led_tx` - Channel to send commands to RGB LED actuator
 /// * `lcd_tx` - Channel to send commands to LCD display
 /// * `pattern_tx` - Channel to send pattern updates (pattern_index, brightness, paused)
+/// * `temp_led_tx` - Channel to send commands to temperature indicator LEDs
+/// * `humidity_led_tx` - Channel to send commands to humidity indicator LEDs
 ///
 /// # Behavior
 /// Central brain that processes events, maintains state, and generates commands
@@ -25,6 +27,8 @@ pub async fn run_controller(
     led_tx: mpsc::Sender<Command>,
     lcd_tx: mpsc::Sender<Command>,
     pattern_tx: mpsc::Sender<(usize, u8, bool)>,
+    temp_led_tx: mpsc::Sender<Command>,
+    humidity_led_tx: mpsc::Sender<Command>,
 ) -> Result<()> {
     // Load config
     let config = load_config("config/config.yaml")?;
@@ -53,6 +57,20 @@ pub async fn run_controller(
         .await
     {
         eprintln!("[Controller] Failed to send initial pattern: {}", e);
+    }
+
+    // Send initial pattern name to LCD line 0
+    if !config.lighting_patterns.is_empty() {
+        let initial_pattern_name = config.lighting_patterns[state.current_pattern_index].name();
+        if let Err(e) = lcd_tx
+            .send(Command::DisplayText {
+                line: 0,
+                text: initial_pattern_name,
+            })
+            .await
+        {
+            eprintln!("[Controller] Failed to send initial pattern to LCD: {}", e);
+        }
     }
 
     println!("[Controller] Ready!");
@@ -88,21 +106,6 @@ pub async fn run_controller(
             Some(event) = event_rx.recv() => {
                 println!("[Controller] Event received: {:?}", event);
 
-                // Send event info to LCD (top row - line 0) - use static strings where possible
-                let event_text = match &event {
-                    Event::MotionDetected => "Motion Detected",
-                    Event::LightingModeTogglePressed => "Mode Toggle",
-                    Event::BrightnessButtonPressed => "Brightness Adj",
-                    Event::PatternCyclePressed => "Pattern Cycle",
-                };
-
-                if let Err(e) = lcd_tx.send(Command::DisplayText {
-                    line: 0,
-                    text: event_text.to_string(),
-                }).await {
-                    eprintln!("[Controller] Error sending event to LCD: {}", e);
-                }
-
                 // Handle the event and get commands to send
                 let commands = handle_event(event, &mut state, &config, &pattern_tx).await;
 
@@ -115,48 +118,36 @@ pub async fn run_controller(
                         if let Err(e) = led_tx.send(command.clone()).await {
                             eprintln!("[Controller] Error sending to RGB LED: {}", e);
                         }
-
-                        // Also send command description to LCD (bottom row - line 1)
-                        let cmd_text = match &command {
-                            Command::RgbLedOn => "LED: ON",
-                            Command::RgbLedOff => "LED: OFF",
-                            Command::SetRgbBrightness(level) => {
-                                // Need to format, so allocate here
-                                &format!("Brightness: {}%", level)
-                            },
-                            Command::SetRgbColor(color) => {
-                                // Format color description
-                                if color == &RgbColor::green() {
-                                    "Color: Green"
-                                } else if color == &RgbColor::blue() {
-                                    "Color: Blue"
-                                } else if color == &RgbColor::red() {
-                                    "Color: Red"
-                                } else if color == &RgbColor::orange() {
-                                    "Color: Orange"
-                                } else {
-                                    "Color: Custom"
-                                }
-                            },
-                            Command::RgbLedBlinkError(times) => {
-                                &format!("Error! Blink x{}", times)
-                            },
-                            _ => "",
-                        };
-                        if !cmd_text.is_empty() {
-                            if let Err(e) = lcd_tx.send(Command::DisplayText {
-                                line: 1,
-                                text: cmd_text.to_string(),
-                            }).await {
-                                eprintln!("[Controller] Error sending command to LCD: {}", e);
-                            }
-                        }
                     }
 
                     // Send display control commands to LCD
-                    if matches!(command, Command::DisplayOn | Command::DisplayOff) {
-                        if let Err(e) = lcd_tx.send(command).await {
+                    if matches!(command, Command::DisplayOn | Command::DisplayOff | Command::DisplayText { .. }) {
+                        if let Err(e) = lcd_tx.send(command.clone()).await {
                             eprintln!("[Controller] Error sending to LCD: {}", e);
+                        }
+                    }
+
+                    // Send temperature indicator LED commands
+                    if matches!(command, Command::SetTemperatureLeds { .. }) {
+                        if let Err(e) = temp_led_tx.send(command.clone()).await {
+                            eprintln!("[Controller] Error sending to temperature LEDs: {}", e);
+                        }
+                    }
+
+                    // Send humidity indicator LED commands
+                    if matches!(command, Command::SetHumidityLeds { .. }) {
+                        if let Err(e) = humidity_led_tx.send(command.clone()).await {
+                            eprintln!("[Controller] Error sending to humidity LEDs: {}", e);
+                        }
+                    }
+
+                    // Send IndicatorLedsOff to both temperature and humidity LED channels
+                    if matches!(command, Command::IndicatorLedsOff) {
+                        if let Err(e) = temp_led_tx.send(command.clone()).await {
+                            eprintln!("[Controller] Error sending to temperature LEDs: {}", e);
+                        }
+                        if let Err(e) = humidity_led_tx.send(command).await {
+                            eprintln!("[Controller] Error sending to humidity LEDs: {}", e);
                         }
                     }
                 }
@@ -180,13 +171,6 @@ pub async fn run_controller(
                                 println!("[Controller] Automatic mode: turning LED and LCD OFF");
                                 if let Err(e) = led_tx.send(Command::RgbLedOff).await {
                                     eprintln!("[Controller] Error sending RgbLedOff command: {}", e);
-                                }
-                                // Send command description to LCD
-                                if let Err(e) = lcd_tx.send(Command::DisplayText {
-                                    line: 1,
-                                    text: "LED: OFF".to_string(),
-                                }).await {
-                                    eprintln!("[Controller] Error sending to LCD: {}", e);
                                 }
                                 if let Err(e) = lcd_tx.send(Command::DisplayOff).await {
                                     eprintln!("[Controller] Error sending DisplayOff command: {}", e);
@@ -263,9 +247,15 @@ async fn handle_event(
             // Toggle between Automatic and Manual Override
             state.lighting_mode = match state.lighting_mode {
                 LightingMode::Automatic => {
-                    println!("[Controller] Switching to Manual Override - turning LED and LCD OFF");
+                    println!(
+                        "[Controller] Switching to Manual Override - turning LED, LCD, and indicator LEDs OFF"
+                    );
                     commands.push(Command::RgbLedOff);
                     commands.push(Command::DisplayOff);
+                    commands.push(Command::IndicatorLedsOff);
+
+                    // Disable indicator LEDs
+                    state.indicator_leds_enabled = false;
 
                     // Pause pattern executor updates
                     if let Err(e) = pattern_tx
@@ -278,7 +268,10 @@ async fn handle_event(
                     LightingMode::ManualOverride
                 }
                 LightingMode::ManualOverride => {
-                    println!("[Controller] Switching to Automatic mode");
+                    println!("[Controller] Switching to Automatic mode - enabling all displays");
+
+                    // Enable indicator LEDs
+                    state.indicator_leds_enabled = true;
 
                     // Resume pattern executor updates
                     if let Err(e) = pattern_tx
@@ -361,7 +354,72 @@ async fn handle_event(
                 {
                     eprintln!("[Controller] Failed to send pattern update: {}", e);
                 }
+
+                // Update LCD line 0 with pattern name
+                commands.push(Command::DisplayText {
+                    line: 0,
+                    text: pattern_name.clone(),
+                });
             }
+        }
+
+        Event::EnvironmentReading {
+            temperature_celsius,
+            humidity_percent,
+        } => {
+            println!(
+                "[Controller] Environment: {:.1}\u{00b0}C, {:.1}% RH",
+                temperature_celsius, humidity_percent
+            );
+
+            // Determine temperature indicator LED state based on thresholds
+            let temp_config = &config.gpio.led.temperature;
+            let (temp_low, temp_medium, temp_high) =
+                if temperature_celsius < temp_config.medium_threshold {
+                    (true, false, false) // Low temperature
+                } else if temperature_celsius < temp_config.high_threshold {
+                    (false, true, false) // Medium temperature
+                } else {
+                    (false, false, true) // High temperature
+                };
+
+            // Use current brightness level for indicator LEDs, or 0 if disabled
+            let indicator_brightness = if state.indicator_leds_enabled {
+                state.brightness_level
+            } else {
+                0
+            };
+
+            commands.push(Command::SetTemperatureLeds {
+                low: temp_low,
+                medium: temp_medium,
+                high: temp_high,
+                brightness: indicator_brightness,
+            });
+
+            // Determine humidity indicator LED state based on thresholds
+            let humidity_config = &config.gpio.led.humidity;
+            let (hum_low, hum_medium, hum_high) =
+                if humidity_percent < humidity_config.medium_threshold {
+                    (true, false, false) // Low humidity
+                } else if humidity_percent < humidity_config.high_threshold {
+                    (false, true, false) // Medium humidity
+                } else {
+                    (false, false, true) // High humidity
+                };
+
+            commands.push(Command::SetHumidityLeds {
+                low: hum_low,
+                medium: hum_medium,
+                high: hum_high,
+                brightness: indicator_brightness,
+            });
+
+            // Update LCD line 1 with temperature and humidity
+            commands.push(Command::DisplayText {
+                line: 1,
+                text: format!("{:.1}C {:.0}%RH", temperature_celsius, humidity_percent),
+            });
         }
     }
 

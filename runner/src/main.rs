@@ -12,24 +12,30 @@
 //! Contains minimal business logic - primarily dependency injection and orchestration.
 
 mod brightness_button;
+mod dht11_sensor;
+mod humidity_led_actuator;
 mod lcd_display;
 mod lighting_override_button;
 mod pattern_button;
 mod pattern_executor;
 mod pir_sensor;
 mod rgb_led_actuator;
+mod temperature_led_actuator;
 
 use anyhow::Result;
 use gpio_core::Event;
 use tokio::sync::{broadcast, mpsc};
 
 use brightness_button::run_brightness_button;
+use dht11_sensor::run_dht11_sensor;
+use humidity_led_actuator::run_humidity_led_actuator;
 use lcd_display::run_lcd_display;
 use lighting_override_button::run_lighting_override_button;
 use pattern_button::run_pattern_button;
 use pattern_executor::run_pattern_executor;
 use pir_sensor::run_pir_sensor;
 use rgb_led_actuator::run_rgb_led_actuator;
+use temperature_led_actuator::run_temperature_led_actuator;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -46,8 +52,14 @@ async fn main() -> Result<()> {
     // Command channel: controller -> LCD actuator
     let (lcd_cmd_tx, lcd_cmd_rx) = mpsc::channel(32);
 
-    // Pattern channel: controller -> pattern executor (pattern_index, brightness)
-    let (pattern_tx, pattern_rx) = mpsc::channel::<(usize, u8, bool)>(32); // (pattern_index, brightness, paused)
+    // Pattern channel: controller -> pattern executor (pattern_index, brightness, paused)
+    let (pattern_tx, pattern_rx) = mpsc::channel::<(usize, u8, bool)>(32);
+
+    // Command channel: controller -> temperature indicator LEDs
+    let (temp_led_cmd_tx, temp_led_cmd_rx) = mpsc::channel(32);
+
+    // Command channel: controller -> humidity indicator LEDs
+    let (humidity_led_cmd_tx, humidity_led_cmd_rx) = mpsc::channel(32);
 
     // Pattern LED channel: pattern executor -> RGB LED (merged with controller commands)
     let (pattern_led_tx, pattern_led_rx) = mpsc::channel(32);
@@ -62,17 +74,21 @@ async fn main() -> Result<()> {
     let override_event_tx = event_tx.clone();
     let brightness_event_tx = event_tx.clone();
     let pattern_event_tx = event_tx.clone();
+    let dht11_event_tx = event_tx.clone();
 
     // Clone shutdown receiver for each task
     let pir_shutdown = shutdown_tx.subscribe();
     let override_shutdown = shutdown_tx.subscribe();
     let brightness_shutdown = shutdown_tx.subscribe();
     let pattern_button_shutdown = shutdown_tx.subscribe();
+    let dht11_shutdown = shutdown_tx.subscribe();
     let controller_shutdown = shutdown_tx.subscribe();
     let pattern_executor_shutdown = shutdown_tx.subscribe();
     let led_mux_shutdown = shutdown_tx.subscribe();
     let led_shutdown = shutdown_tx.subscribe();
     let lcd_shutdown = shutdown_tx.subscribe();
+    let temp_led_shutdown = shutdown_tx.subscribe();
+    let humidity_led_shutdown = shutdown_tx.subscribe();
 
     // === SENSORS ===
 
@@ -140,6 +156,15 @@ async fn main() -> Result<()> {
     });
     println!("  ✓ Pattern cycle button spawned");
 
+    // Spawn DHT11 sensor task
+    let dht11_handle = tokio::spawn(async move {
+        let shutdown = dht11_shutdown;
+        if let Err(e) = run_dht11_sensor(dht11_event_tx, shutdown).await {
+            eprintln!("DHT11 sensor error: {}", e);
+        }
+    });
+    println!("  ✓ DHT11 sensor spawned");
+
     // === CONTROLLER ===
 
     // Clone command senders so we can use them for shutdown
@@ -149,7 +174,7 @@ async fn main() -> Result<()> {
     let controller_handle = tokio::spawn(async move {
         let mut shutdown = controller_shutdown;
         tokio::select! {
-            result = controller::run_controller(event_rx, rgb_led_cmd_tx, lcd_cmd_tx, pattern_tx) => {
+            result = controller::run_controller(event_rx, rgb_led_cmd_tx, lcd_cmd_tx, pattern_tx, temp_led_cmd_tx, humidity_led_cmd_tx) => {
                 if let Err(e) = result {
                     eprintln!("Controller error: {}", e);
                 }
@@ -257,11 +282,44 @@ async fn main() -> Result<()> {
     });
     println!("  ✓ LCD display spawned");
 
+    // Spawn temperature indicator LED actuator task
+    let temp_led_handle = tokio::spawn(async move {
+        let mut shutdown = temp_led_shutdown;
+        tokio::select! {
+            result = run_temperature_led_actuator(temp_led_cmd_rx) => {
+                if let Err(e) = result {
+                    eprintln!("Temperature LED actuator error: {}", e);
+                }
+            }
+            _ = shutdown.recv() => {
+                println!("[Temperature LEDs] Shutdown signal received");
+            }
+        }
+    });
+    println!("  ✓ Temperature indicator LEDs spawned");
+
+    // Spawn humidity indicator LED actuator task
+    let humidity_led_handle = tokio::spawn(async move {
+        let mut shutdown = humidity_led_shutdown;
+        tokio::select! {
+            result = run_humidity_led_actuator(humidity_led_cmd_rx) => {
+                if let Err(e) = result {
+                    eprintln!("Humidity LED actuator error: {}", e);
+                }
+            }
+            _ = shutdown.recv() => {
+                println!("[Humidity LEDs] Shutdown signal received");
+            }
+        }
+    });
+    println!("  ✓ Humidity indicator LEDs spawned");
+
     println!("\n=== System Ready ===");
     println!("All components running.");
     println!("");
     println!("Controls:");
     println!("  • PIR sensor: Wave hand to trigger motion detection");
+    println!("  • DHT11 sensor: Reads temperature and humidity every 2 seconds");
     println!("  • Override button: Toggle Automatic/Manual mode");
     println!("  • Brightness button: Cycle brightness (25% → 50% → 75% → 100%)");
     println!("  • Pattern button: Cycle lighting patterns");
@@ -294,11 +352,14 @@ async fn main() -> Result<()> {
         override_handle,
         brightness_handle,
         pattern_button_handle,
+        dht11_handle,
         controller_handle,
         pattern_executor_handle,
         led_mux_handle,
         rgb_led_handle,
-        lcd_handle
+        lcd_handle,
+        temp_led_handle,
+        humidity_led_handle
     );
 
     println!("\nGPIO System shut down cleanly.");
