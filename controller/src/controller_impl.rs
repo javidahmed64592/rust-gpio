@@ -166,14 +166,27 @@ pub async fn run_controller(
                             );
                             state.presence_detected = false;
 
-                            // In Automatic mode, turn LED and LCD off when presence expires
+                            // In Automatic mode, turn LED, LCD, and indicator LEDs off when presence expires
                             if state.lighting_mode == LightingMode::Automatic {
-                                println!("[Controller] Automatic mode: turning LED and LCD OFF");
+                                println!("[Controller] Automatic mode: turning LED, LCD, and indicator LEDs OFF");
                                 if let Err(e) = led_tx.send(Command::RgbLedOff).await {
                                     eprintln!("[Controller] Error sending RgbLedOff command: {}", e);
                                 }
                                 if let Err(e) = lcd_tx.send(Command::DisplayOff).await {
                                     eprintln!("[Controller] Error sending DisplayOff command: {}", e);
+                                }
+                                if let Err(e) = temp_led_tx.send(Command::IndicatorLedsOff).await {
+                                    eprintln!("[Controller] Error sending IndicatorLedsOff to temp LEDs: {}", e);
+                                }
+                                if let Err(e) = humidity_led_tx.send(Command::IndicatorLedsOff).await {
+                                    eprintln!("[Controller] Error sending IndicatorLedsOff to humidity LEDs: {}", e);
+                                }
+                                // Pause pattern executor to stop RGB LED updates
+                                if let Err(e) = pattern_tx
+                                    .send((state.current_pattern_index, state.brightness_level, true))
+                                    .await
+                                {
+                                    eprintln!("[Controller] Failed to pause pattern executor: {}", e);
                                 }
                             }
                         }
@@ -228,6 +241,14 @@ async fn handle_event(
                 if !was_present {
                     println!("[Controller] Presence started - turning displays ON");
                     commands.push(Command::DisplayOn);
+
+                    // Resume pattern executor for all patterns
+                    if let Err(e) = pattern_tx
+                        .send((state.current_pattern_index, state.brightness_level, false))
+                        .await
+                    {
+                        eprintln!("[Controller] Failed to resume pattern executor: {}", e);
+                    }
 
                     // For EventDriven patterns, controller manages LED color
                     if is_event_driven {
@@ -372,54 +393,62 @@ async fn handle_event(
                 temperature_celsius, humidity_percent
             );
 
-            // Determine temperature indicator LED state based on thresholds
-            let temp_config = &config.gpio.led.temperature;
-            let (temp_low, temp_medium, temp_high) =
-                if temperature_celsius < temp_config.medium_threshold {
-                    (true, false, false) // Low temperature
-                } else if temperature_celsius < temp_config.high_threshold {
-                    (false, true, false) // Medium temperature
+            // Only update displays if presence is detected and in Automatic mode
+            // This keeps the system idle when no one is present
+            if state.presence_detected && state.lighting_mode == LightingMode::Automatic {
+                // Determine temperature indicator LED state based on thresholds
+                let temp_config = &config.gpio.led.temperature;
+                let (temp_low, temp_medium, temp_high) =
+                    if temperature_celsius < temp_config.medium_threshold {
+                        (true, false, false) // Low temperature
+                    } else if temperature_celsius < temp_config.high_threshold {
+                        (false, true, false) // Medium temperature
+                    } else {
+                        (false, false, true) // High temperature
+                    };
+
+                // Use current brightness level for indicator LEDs, or 0 if disabled
+                let indicator_brightness = if state.indicator_leds_enabled {
+                    state.brightness_level
                 } else {
-                    (false, false, true) // High temperature
+                    0
                 };
 
-            // Use current brightness level for indicator LEDs, or 0 if disabled
-            let indicator_brightness = if state.indicator_leds_enabled {
-                state.brightness_level
+                commands.push(Command::SetTemperatureLeds {
+                    low: temp_low,
+                    medium: temp_medium,
+                    high: temp_high,
+                    brightness: indicator_brightness,
+                });
+
+                // Determine humidity indicator LED state based on thresholds
+                let humidity_config = &config.gpio.led.humidity;
+                let (hum_low, hum_medium, hum_high) =
+                    if humidity_percent < humidity_config.medium_threshold {
+                        (true, false, false) // Low humidity
+                    } else if humidity_percent < humidity_config.high_threshold {
+                        (false, true, false) // Medium humidity
+                    } else {
+                        (false, false, true) // High humidity
+                    };
+
+                commands.push(Command::SetHumidityLeds {
+                    low: hum_low,
+                    medium: hum_medium,
+                    high: hum_high,
+                    brightness: indicator_brightness,
+                });
+
+                // Update LCD line 1 with temperature and humidity
+                commands.push(Command::DisplayText {
+                    line: 1,
+                    text: format!("{:.1}C {:.0}%RH", temperature_celsius, humidity_percent),
+                });
             } else {
-                0
-            };
-
-            commands.push(Command::SetTemperatureLeds {
-                low: temp_low,
-                medium: temp_medium,
-                high: temp_high,
-                brightness: indicator_brightness,
-            });
-
-            // Determine humidity indicator LED state based on thresholds
-            let humidity_config = &config.gpio.led.humidity;
-            let (hum_low, hum_medium, hum_high) =
-                if humidity_percent < humidity_config.medium_threshold {
-                    (true, false, false) // Low humidity
-                } else if humidity_percent < humidity_config.high_threshold {
-                    (false, true, false) // Medium humidity
-                } else {
-                    (false, false, true) // High humidity
-                };
-
-            commands.push(Command::SetHumidityLeds {
-                low: hum_low,
-                medium: hum_medium,
-                high: hum_high,
-                brightness: indicator_brightness,
-            });
-
-            // Update LCD line 1 with temperature and humidity
-            commands.push(Command::DisplayText {
-                line: 1,
-                text: format!("{:.1}C {:.0}%RH", temperature_celsius, humidity_percent),
-            });
+                println!(
+                    "[Controller] No presence detected - skipping environmental display updates (idle)"
+                );
+            }
         }
     }
 
